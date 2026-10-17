@@ -1,5 +1,6 @@
 """`qlm doctor`: read-only checks of this machine before installing or starting the server."""
 
+import os
 from dataclasses import dataclass
 
 from qlm import pins, profiles
@@ -11,6 +12,7 @@ MIN_RAM = 32 * GIB
 PORT = 9931
 HOST = "127.0.0.1"
 CON_BAD_KEY = "con.agent.providers.openai-compatible."
+TIMEOUT_S = 10
 
 
 @dataclass
@@ -46,29 +48,39 @@ def run(ctx):
     return 0
 
 
+def _run(ctx, argv):
+    return ctx.runner.run(argv, timeout=TIMEOUT_S)
+
+
 class _Facts:
     """Tool output shared by several checks, gathered once."""
 
     def __init__(self, ctx):
         self.gpu = None
+        self.gpu_problem = NO_SMI
         self.apps = []
         if ctx.runner.which("nvidia-smi"):
-            r = ctx.runner.run(
+            r = _run(
+                ctx,
                 ["nvidia-smi", "--query-gpu=name,compute_cap,memory.total,memory.used,driver_version",
-                 "--format=csv,noheader,nounits"]
+                 "--format=csv,noheader,nounits"],
             )
             if r.code == 0 and r.stdout.strip():
-                name, cap, total, used, driver = [f.strip() for f in r.stdout.splitlines()[0].split(",")]
-                self.gpu = {"name": name, "cap": cap, "total": int(total), "used": int(used), "driver": driver}
-                a = ctx.runner.run(
-                    ["nvidia-smi", "--query-compute-apps=pid,process_name,used_memory", "--format=csv,noheader,nounits"]
+                try:
+                    name, cap, total, used, driver = [f.strip() for f in r.stdout.splitlines()[0].split(",")]
+                    self.gpu = {"name": name, "cap": cap, "total": int(total), "used": int(used), "driver": driver}
+                except ValueError:
+                    self.gpu_problem = "unparseable nvidia-smi output: " + r.stdout.splitlines()[0].strip()
+            if self.gpu is not None:
+                a = _run(
+                    ctx, ["nvidia-smi", "--query-compute-apps=pid,process_name,used_memory", "--format=csv,noheader,nounits"]
                 )
                 for line in a.stdout.splitlines() if a.code == 0 else []:
                     fields = [f.strip() for f in line.split(",")]
                     if len(fields) >= 3:
                         # Process names can contain commas: the first field is the PID, the last the MiB.
                         self.apps.append((fields[0], ", ".join(fields[1:-1]).replace(", ", ","), fields[-1]))
-        r = ctx.runner.run(["systemctl", "--user", "show", "-p", "MainPID", "--value", "qlm-server"])
+        r = _run(ctx, ["systemctl", "--user", "show", "-p", "MainPID", "--value", "qlm-server"])
         pid = r.stdout.strip()
         self.server_pid = int(pid) if r.code == 0 and pid.isdigit() and int(pid) > 0 else None
 
@@ -78,14 +90,14 @@ NO_SMI = "nvidia-smi not available"
 
 def _gpu(f):
     if f.gpu is None:
-        return Check("FAIL", "gpu", NO_SMI)
+        return Check("FAIL", "gpu", f.gpu_problem)
     detail = f"{f.gpu['name']}, driver {f.gpu['driver']}"
     return Check("PASS" if f.gpu["name"] == "NVIDIA GeForce RTX 4090" else "WARN", "gpu", detail)
 
 
 def _compute_capability(f):
     if f.gpu is None:
-        return Check("FAIL", "compute capability", NO_SMI)
+        return Check("FAIL", "compute capability", f.gpu_problem)
     ok = f.gpu["cap"] == "8.9"
     return Check("PASS" if ok else "FAIL", "compute capability", f.gpu["cap"] + ("" if ok else ", the build targets 8.9"))
 
@@ -94,7 +106,7 @@ def _nvcc(ctx):
     path = ctx.runner.which("nvcc", extra_dirs=["/opt/cuda/bin"])
     if not path:
         return Check("FAIL", "nvcc", "not found on PATH or in /opt/cuda/bin; install the cuda package")
-    r = ctx.runner.run([path, "--version"])
+    r = _run(ctx, [path, "--version"])
     release = next((l.split("release", 1)[1].strip() for l in r.stdout.splitlines() if "release" in l), "unknown version")
     return Check("PASS", "nvcc", f"{path}, release {release}")
 
@@ -151,7 +163,7 @@ def _port(ctx, f):
 def _ollama(ctx):
     if not ctx.runner.which("ollama"):
         return Check("PASS", "ollama", "not installed")
-    r = ctx.runner.run(["ollama", "ps"])
+    r = _run(ctx, ["ollama", "ps"])
     if r.code != 0:
         return Check("PASS", "ollama", "daemon not running")
     on_gpu = [l.split()[0] for l in r.stdout.splitlines()[1:] if l.strip() and "GPU" in l]
@@ -163,7 +175,7 @@ def _ollama(ctx):
 
 def _vram(ctx, f):
     if f.gpu is None:
-        return Check("FAIL", "vram", NO_SMI)
+        return Check("FAIL", "vram", f.gpu_problem)
     if f.server_pid is not None:
         return Check("PASS", "vram", "server running")
     agent = profiles.load(ctx.paths.profiles_dir / "agent.env")
@@ -177,7 +189,8 @@ def _vram(ctx, f):
 
 
 def _path(ctx):
-    if str(ctx.paths.local_bin) in ctx.env.path:
+    wanted = os.path.normpath(ctx.paths.local_bin)
+    if any(entry and os.path.normpath(entry) == wanted for entry in ctx.env.path):
         return Check("PASS", "~/.local/bin on PATH", "yes")
     return Check("WARN", "~/.local/bin on PATH", 'no; add to ~/.zshrc: export PATH="$HOME/.local/bin:$PATH"')
 

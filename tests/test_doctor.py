@@ -197,3 +197,23 @@ def test_vram_passes_when_the_server_is_already_running(home, repo):
     env = FakeEnv(path=[str(home / ".local/bin")], listener=4242)
     _, lines, _ = run_doctor(home, repo, runner=runner, env=env)
     assert line_for(lines, "vram").startswith("PASS ") and "server running" in line_for(lines, "vram")
+
+
+def test_unparseable_nvidia_smi_output_fails_gpu_checks_without_crashing(home, repo):
+    runner = healthy_runner({GPU: ok("NVIDIA GeForce RTX 4090, 8.9, 24564, [N/A], 615.78.08\n")})
+    code, lines, _ = run_doctor(home, repo, runner=runner)
+    assert code == 1
+    assert len(lines) == 12
+    assert "unparseable" in line_for(lines, "gpu")
+    assert line_for(lines, "vram").startswith("FAIL ")
+
+
+def test_path_entry_with_trailing_slash_counts(home, repo):
+    env = FakeEnv(path=[str(home / ".local/bin") + "/"])
+    _, lines, _ = run_doctor(home, repo, env=env)
+    assert line_for(lines, "~/.local/bin on PATH").startswith("PASS ")
+
+
+def test_doctor_commands_have_a_timeout(home, repo):
+    _, _, ctx = run_doctor(home, repo)
+    assert ctx.runner.calls and all(c["timeout"] == 10 for c in ctx.runner.calls)

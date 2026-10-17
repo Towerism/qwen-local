@@ -63,17 +63,22 @@ class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
 class Runner:
     """Runs commands from argv lists, never through a shell."""
 
-    def run(self, argv, cwd=None, env=None):
+    def run(self, argv, cwd=None, env=None, timeout=None):
         full_env = None
         if env:
             full_env = dict(os.environ)
             full_env.update(env)
         try:
             p = subprocess.run(
-                [str(a) for a in argv], cwd=cwd, env=full_env, capture_output=True, text=True, errors="replace"
+                [str(a) for a in argv], cwd=cwd, env=full_env, capture_output=True, text=True, errors="replace",
+                timeout=timeout,
             )
         except FileNotFoundError as e:
             return RunResult(127, "", str(e))
+        except subprocess.TimeoutExpired:
+            return RunResult(124, "", f"{argv[0]} timed out after {timeout} s")
+        except OSError as e:
+            return RunResult(126, "", str(e))
         return RunResult(p.returncode, p.stdout, p.stderr)
 
     def which(self, name, extra_dirs=()):
@@ -137,18 +142,11 @@ class Env:
         return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES")
 
     def listener_pid(self, host, port):
-        """PID listening on host:port, None if free, "unknown" if held but the PID is hidden."""
-        try:
-            p = subprocess.run(
-                ["ss", "-Hltnp", f"sport = :{port}"], capture_output=True, text=True, errors="replace"
-            )
-        except FileNotFoundError:
+        """PID listening where it blocks host:port, None if free, "unknown" if held but the PID is hidden."""
+        r = Runner().run(["ss", "-Hltnp", f"sport = :{port}"], timeout=10)
+        if r.code != 0:
             return "unknown"
-        lines = [l for l in p.stdout.splitlines() if f"{host}:{port}" in l or f"*:{port}" in l or f"[::]:{port}" in l]
-        if not lines:
-            return None
-        m = re.search(r"pid=(\d+)", lines[0])
-        return int(m.group(1)) if m else "unknown"
+        return parse_ss_listener(r.stdout, host, port)
 
     def is_tty(self, stream):
         return sys.stderr.isatty()
@@ -158,6 +156,25 @@ class Env:
 
     def cpu_count(self):
         return os.cpu_count() or 1
+
+
+def parse_ss_listener(stdout, host, port):
+    """From `ss -Hltnp` output, the PID of a listener that stops a bind to host:port.
+
+    A wildcard address (0.0.0.0, *, [::]) or host itself blocks it; another specific address doesn't.
+    """
+    blocking = {host, "0.0.0.0", "*", "[::]", f"[::ffff:{host}]", "[::ffff:0.0.0.0]"}
+    for line in stdout.splitlines():
+        fields = line.split()
+        local = next((f for f in fields if f.endswith(f":{port}")), None)
+        if local is None:
+            continue
+        addr = local.rsplit(":", 1)[0].split("%", 1)[0]
+        if addr not in blocking:
+            continue
+        m = re.search(r"pid=(\d+)", line)
+        return int(m.group(1)) if m else "unknown"
+    return None
 
 
 @dataclass
@@ -171,7 +188,7 @@ class Ctx:
     err: TextIO
 
     def say(self, line):
-        print(line, file=self.out)
+        print(line, file=self.out, flush=True)
 
     def warn(self, line):
         print(line, file=self.err)

@@ -22,9 +22,9 @@ class FakeRunner:
         self.which_map = dict(which or {})
         self.calls = []
 
-    def run(self, argv, cwd=None, env=None):
+    def run(self, argv, cwd=None, env=None, timeout=None):
         argv = [str(a) for a in argv]
-        self.calls.append({"argv": argv, "cwd": cwd, "env": env})
+        self.calls.append({"argv": argv, "cwd": cwd, "env": env, "timeout": timeout})
         best = None
         for key, value in self.script.items():
             if tuple(argv[: len(key)]) == key and (best is None or len(key) > len(best[0])):
@@ -83,7 +83,10 @@ class FakeHttp:
             status = 200
         body = data[start:]
         drop = self.drops.pop(0) if self.drops else None
-        return HttpResponse(status, {"content-length": str(len(body))}, self._chunks(body, drop))
+        headers = {"content-length": str(len(body))}
+        if status == 206:
+            headers["content-range"] = f"bytes {start}-{len(data) - 1}/{len(data)}"
+        return HttpResponse(status, headers, self._chunks(body, drop))
 
     def _chunks(self, body, drop):
         sent = 0
