@@ -556,6 +556,14 @@ def test_going_back_from_a_hand_edited_profile_suggests_agent(home, repo):
     assert "qlm profile use agent" in out(ctx)
 
 
+def test_start_gives_up_on_a_server_that_was_already_loading(home, repo):
+    install(home, repo)
+    run = runner({SHOW: [unit("activating", "start", 4321), unit("failed", "failed", 0)]})
+    ctx = ctx_for(home, repo, run=run, server=FakeServer({("GET", "/health"): health(503)}))
+    assert cli.main(["start"], ctx) == 1
+    assert run.ran(*START) == [] and len(run.ran(*STOP)) == 1
+
+
 def test_a_port_held_by_a_hidden_process_is_named_as_such(home, repo):
     install(home, repo)
     ctx = ctx_for(home, repo, env=FakeEnv(listener="unknown"))

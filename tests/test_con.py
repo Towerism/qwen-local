@@ -333,6 +333,14 @@ def test_a_write_that_does_not_verify_is_rolled_back(home, repo, monkeypatch):
     assert KEY not in output(ctx)
 
 
+def test_a_new_file_that_does_not_verify_is_removed_again(home, repo, monkeypatch):
+    real_write = con._write
+    monkeypatch.setattr(con, "_write", lambda path, data, mode: real_write(path, b"con.version = 1\n", mode))
+    ctx = ctx_for(home, repo)
+    assert cli.main(["con", "--apply"], ctx) == 1
+    assert not (home / ".config/con/con.conf").exists()
+
+
 def test_a_failed_write_leaves_the_file_and_no_temporary_file(home, repo, monkeypatch):
     conf = write_conf(home, ORIGINAL)
     old = conf.read_bytes()
@@ -476,6 +484,23 @@ def test_a_failed_pull_changes_nothing(home, repo):
     assert cli.main(["suggest", "--enable"], ctx) == 1
     assert run.ran(*OLLAMA_CREATE) == []
     assert text_of(home) == before and backups(home) == []
+
+
+def test_a_failed_create_changes_nothing(home, repo):
+    write_conf(home, ORIGINAL)
+    before = text_of(home)
+    ctx = ctx_for(home, repo, run=runner({OLLAMA_CREATE: fail(stderr="model too large")}))
+    assert cli.main(["suggest", "--enable"], ctx) == 1
+    assert "model too large" in output(ctx)
+    assert text_of(home) == before and backups(home) == []
+
+
+def test_disabling_twice_says_it_is_already_off(home, repo):
+    write_conf(home, ORIGINAL)
+    cli.main(["suggest", "--disable"], ctx_for(home, repo))
+    ctx = ctx_for(home, repo)
+    assert cli.main(["suggest", "--disable"], ctx) == 0
+    assert "already off" in output(ctx) and len(backups(home)) == 1
 
 
 def test_enable_checks_the_config_before_downloading(home, repo):
