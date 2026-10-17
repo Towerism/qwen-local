@@ -21,6 +21,7 @@ EXPECTED_FILES = [
     "qlm/install.py",
     "qlm/fetch.py",
     "qlm/files.py",
+    "qlm/con.py",
     "qlm/service.py",
     "qlm/smoke.py",
     "profiles/agent.env",
@@ -46,7 +47,7 @@ def test_help_through_symlink_from_another_directory(tmp_path, repo, monkeypatch
 
     assert exc.value.code == 0
     out = capsys.readouterr().out
-    for name in ("doctor", "install", "fetch", "profile", "start", "stop", "status", "logs", "smoke"):
+    for name in ("doctor", "install", "fetch", "profile", "start", "stop", "status", "logs", "smoke", "con", "suggest"):
         assert name in out
 
 

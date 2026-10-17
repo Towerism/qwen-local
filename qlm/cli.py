@@ -32,6 +32,15 @@ def build_parser():
     sub.add_parser("stop", help="stop the server")
     sub.add_parser("status", help="show the server's state, profile, VRAM and context use")
     sub.add_parser("smoke", help="run eight API checks against the running server")
+    con = sub.add_parser("con", help="show, write or undo the Con settings for the local server")
+    con_mode = con.add_mutually_exclusive_group(required=True)
+    con_mode.add_argument("--print", dest="mode", action="store_const", const="print", help="show what --apply would do")
+    con_mode.add_argument("--apply", dest="mode", action="store_const", const="apply", help="write the settings")
+    con_mode.add_argument("--revert", dest="mode", action="store_const", const="revert", help="restore the last backup")
+    suggest = sub.add_parser("suggest", help="turn Con's suggestions on (CPU-only Ollama model) or off")
+    suggest_mode = suggest.add_mutually_exclusive_group(required=True)
+    suggest_mode.add_argument("--enable", dest="enable", action="store_true", default=None, help="turn suggestions on")
+    suggest_mode.add_argument("--disable", dest="enable", action="store_false", help="turn suggestions off")
     logs = sub.add_parser("logs", help="show the server's journal")
     logs.add_argument("-n", dest="lines", type=_positive_int, default=50, help="number of lines (default 50)")
     logs.add_argument("-f", dest="follow", action="store_true", help="keep following new lines")
@@ -84,6 +93,15 @@ def main(argv=None, ctx=None):
             print(f"qlm: no profile named {args.name!r}. Choose one of: {', '.join(names)}.", file=ctx.err)
             return 2
         return service.run(ctx, service.profile_use, name=args.name)
+    if args.command == "con":
+        from qlm import con, service
+
+        command = {"print": con.print_plan, "apply": con.apply, "revert": con.revert}[args.mode]
+        return service.run(ctx, command)
+    if args.command == "suggest":
+        from qlm import con, service
+
+        return service.run(ctx, con.suggest, enable=args.enable)
     if args.command == "smoke":
         from qlm import smoke
 
