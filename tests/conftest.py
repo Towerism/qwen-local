@@ -16,8 +16,19 @@ def no_real_io(request, monkeypatch):
     def refuse(*args, **kwargs):
         raise AssertionError("tests must not use the network or real subprocesses")
 
-    monkeypatch.setattr(socket.socket, "connect", refuse)
     monkeypatch.setattr(subprocess, "Popen", refuse)
+    if not request.node.get_closest_marker("loopback"):
+        monkeypatch.setattr(socket.socket, "connect", refuse)
+        return
+
+    real_connect = socket.socket.connect
+
+    def loopback_only(sock, address):
+        if not (isinstance(address, tuple) and address[0] == "127.0.0.1"):
+            refuse()
+        return real_connect(sock, address)
+
+    monkeypatch.setattr(socket.socket, "connect", loopback_only)
 
 
 @pytest.fixture

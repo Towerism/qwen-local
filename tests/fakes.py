@@ -3,28 +3,30 @@
 import datetime
 import hashlib
 import io
+import json
 from dataclasses import dataclass, field
 
 from qlm import pins
 from qlm.paths import Paths
-from qlm.system import Ctx, HttpResponse, RunResult
+from qlm.system import Ctx, HttpResponse, LocalResponse, RunResult
 
 
 class FakeRunner:
     """Answers commands from a script keyed by argv prefix and records every call.
 
-    A script value is a RunResult, or a callable taking argv and returning one.
-    The longest matching prefix wins. Unscripted commands fail loudly.
+    A script value is a RunResult, a callable taking argv and returning one, or a list of
+    either, used one per call with the last repeated. The longest matching prefix wins.
+    Unscripted commands fail loudly. `passthrough` answers from the same script with the
+    result's exit code, or raises the value if it is an exception.
     """
 
     def __init__(self, script=None, which=None):
         self.script = dict(script or {})
         self.which_map = dict(which or {})
         self.calls = []
+        self.passthrough_calls = []
 
-    def run(self, argv, cwd=None, env=None, timeout=None):
-        argv = [str(a) for a in argv]
-        self.calls.append({"argv": argv, "cwd": cwd, "env": env, "timeout": timeout})
+    def _answer(self, argv):
         best = None
         for key, value in self.script.items():
             if tuple(argv[: len(key)]) == key and (best is None or len(key) > len(best[0])):
@@ -32,7 +34,22 @@ class FakeRunner:
         if best is None:
             raise AssertionError(f"unscripted command: {argv}")
         value = best[1]
+        if isinstance(value, list):
+            value = value.pop(0) if len(value) > 1 else value[0]
+        if isinstance(value, BaseException):
+            raise value
         return value(argv) if callable(value) else value
+
+    def run(self, argv, cwd=None, env=None, timeout=None):
+        argv = [str(a) for a in argv]
+        self.calls.append({"argv": argv, "cwd": cwd, "env": env, "timeout": timeout})
+        return self._answer(argv)
+
+    def passthrough(self, argv):
+        argv = [str(a) for a in argv]
+        self.passthrough_calls.append(argv)
+        self.calls.append({"argv": argv, "cwd": None, "env": None, "timeout": None})
+        return self._answer(argv).code
 
     def which(self, name, extra_dirs=()):
         return self.which_map.get(name)
@@ -103,8 +120,11 @@ class FakeHttp:
 
 
 class FakeClock:
-    def __init__(self, now=datetime.datetime(2026, 10, 17, 12, 0, 0, tzinfo=datetime.timezone.utc)):
+    """A fixed clock. With advance=True, each sleep moves now() forward by the time slept."""
+
+    def __init__(self, now=datetime.datetime(2026, 10, 17, 12, 0, 0, tzinfo=datetime.timezone.utc), advance=False):
         self._now = now
+        self.advance = advance
         self.sleeps = []
 
     def now(self):
@@ -112,6 +132,47 @@ class FakeClock:
 
     def sleep(self, seconds):
         self.sleeps.append(seconds)
+        if self.advance:
+            self._now += datetime.timedelta(seconds=seconds)
+
+
+class FakeServer:
+    """Answers Http.request like llama-server, from replies keyed by (method, path).
+
+    A reply is a LocalResponse, an exception to raise, a callable taking the request
+    record and returning either, or a list of those used one per call with the last
+    repeated. Unscripted paths fail loudly. Every request is recorded.
+    """
+
+    def __init__(self, replies=None):
+        self.replies = dict(replies or {})
+        self.requests = []
+
+    def request(self, method, url, headers=None, json_body=None, timeout_s=10):
+        path = url.split("9931", 1)[1] if "9931" in url else url
+        record = {"method": method, "path": path, "headers": dict(headers or {}), "json": json_body, "timeout_s": timeout_s}
+        self.requests.append(record)
+        if (method, path) not in self.replies:
+            raise AssertionError(f"unscripted request: {method} {path}")
+        value = self.replies[(method, path)]
+        if isinstance(value, list):
+            value = value.pop(0) if len(value) > 1 else value[0]
+        if callable(value) and not isinstance(value, type):
+            value = value(record)
+        if isinstance(value, BaseException):
+            raise value
+        return value
+
+    def to(self, method, path):
+        return [r for r in self.requests if r["method"] == method and r["path"] == path]
+
+
+def reply(status=200, body=b"", headers=None):
+    if not isinstance(body, (bytes, str)):
+        body = json.dumps(body)
+    if isinstance(body, str):
+        body = body.encode()
+    return LocalResponse(status, dict(headers or {}), body)
 
 
 @dataclass
@@ -123,6 +184,10 @@ class FakeEnv:
     tty: bool = False
     token: str = "k" * 43
     cpus: int = 32
+    xdg: object = None
+
+    def xdg_config_home(self):
+        return self.xdg
 
     def disk_free(self, path):
         return self.disk_free_bytes
