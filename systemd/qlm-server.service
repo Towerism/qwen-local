@@ -1,0 +1,13 @@
+[Unit]
+Description=llama-server for Qwen3.8-27B (qlm)
+StartLimitIntervalSec=120
+StartLimitBurst=3
+
+[Service]
+EnvironmentFile=%h/.config/qlm/active.env
+ExecStart=%h/.local/opt/llama.cpp/current/bin/llama-server
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

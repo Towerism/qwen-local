@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-m 'not machine' -p no:cacheprovider"
+markers = [
+    "machine: runs real tools on this machine (GPU, network or long builds); opt in with -m machine",
+]
