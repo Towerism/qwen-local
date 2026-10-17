@@ -4,6 +4,7 @@ Commands receive these through a Ctx so tests can replace each one with a fake.
 """
 
 import datetime
+import http.client
 import json
 import os
 import re
@@ -155,6 +156,10 @@ class Http:
             raise ServerUnreachable(f"timed out after {timeout_s} s") from None
         except (ConnectionError, OSError) as e:
             raise ServerUnreachable(e.strerror or str(e)) from None
+        except http.client.HTTPException as e:
+            # A reply cut off mid-body (the server died) or malformed. Name only the kind:
+            # the exception text could echo part of the request.
+            raise ServerUnreachable(f"broken reply ({type(e).__name__})") from None
 
     def get(self, url, range_start=None, timeout_s=60):
         headers = {"User-Agent": USER_AGENT}

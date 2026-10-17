@@ -290,6 +290,41 @@ def test_two_runs_in_one_second_get_separate_logs(home, repo):
     ]
 
 
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"models": reply(200, "[1, 2]")},
+        {"tool_call": reply(200, '{"choices": ["x"]}')},
+        {"tool_call": reply(200, '{"choices": [{"message": {"tool_calls": ["x"]}}]}')},
+        {"messages": reply(200, '{"content": ["x"]}')},
+        {"thinking": reply(200, '"just a string"')},
+    ],
+)
+def test_an_odd_reply_shape_fails_its_check_without_a_traceback(home, repo, override):
+    code, ctx = run_smoke(home, repo, make_server(**override))
+    assert code == 1
+    assert len(lines(ctx)) == 8
+    shown = ctx.out.getvalue()
+    assert "unexpected reply shape" in shown or "the reply has no choices[0].message" in shown
+
+
+def test_each_check_line_is_printed_as_soon_as_it_finishes(home, repo):
+    server = make_server()
+    printed_before = []
+    original = server.request
+
+    def spy(method, url, **kwargs):
+        if url.endswith("/v1/messages"):
+            printed_before.append(ctx.out.getvalue())
+        return original(method, url, **kwargs)
+
+    install(home, repo, key=KEY)
+    ctx = make_ctx(home, repo, runner=FakeRunner(), http=server, clock=FakeClock(advance=True))
+    server.request = spy
+    cli.main(["smoke"], ctx)
+    assert "PASS 4 tool loop" in printed_before[0]
+
+
 def test_a_missing_key_file_fails_before_any_request(home, repo):
     install(home, repo)
     (home / ".config/qlm/api-key").unlink()

@@ -113,6 +113,19 @@ def test_request_reports_a_timeout_as_unreachable(monkeypatch):
         http.request("GET", "http://127.0.0.1:9931/health", timeout_s=5)
 
 
+def test_request_reports_a_reply_cut_off_mid_body_as_unreachable(monkeypatch):
+    import http.client
+
+    http_ = Http()
+
+    def cut_off(req, timeout):
+        raise http.client.IncompleteRead(b"partial", 100)
+
+    monkeypatch.setattr(http_.local_opener, "open", cut_off)
+    with pytest.raises(ServerUnreachable, match="IncompleteRead"):
+        http_.request("POST", "http://127.0.0.1:9931/v1/chat/completions", headers={"Authorization": "Bearer k"}, timeout_s=5)
+
+
 def test_passthrough_returns_the_exit_code_without_capturing(monkeypatch):
     seen = {}
 

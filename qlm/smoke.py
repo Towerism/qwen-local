@@ -243,18 +243,25 @@ def _run(ctx):
 
     results = {}
 
-    def attempt(number, fn, *args):
+    def report(check):
+        results[check.number] = check
+        ctx.say(check.line())
+
+    def attempt(number, fn, *args, detail=None):
         try:
             value = fn(*args)
         except CheckFailed as e:
-            results[number] = Check(number, "FAIL", str(e))
+            report(Check(number, "FAIL", str(e)))
             return None
-        detail = value if isinstance(value, str) else "ok"
-        results[number] = Check(number, "PASS", detail)
+        except (AttributeError, KeyError, TypeError, IndexError):
+            # A JSON reply that isn't shaped like llama-server's (a list where an object belongs...)
+            report(Check(number, "FAIL", "unexpected reply shape; see the log"))
+            return None
+        report(Check(number, "PASS", detail or (value if isinstance(value, str) else "ok")))
         return value
 
     def skip(number, why):
-        results[number] = Check(number, "SKIP", why)
+        report(Check(number, "SKIP", why))
 
     def health():
         status = service.health_status(ctx)
@@ -268,12 +275,11 @@ def _run(ctx):
             skip(n, "the server isn't ready")
     else:
         attempt(2, check_models, client)
-        called = attempt(3, check_tool_call, client)
+        called = attempt(3, check_tool_call, client, detail=f"{TOOL_NAME} called with order_id {ORDER_ID}")
         if called is None:
             skip(4, "check 3 failed")
         else:
             attempt(4, check_tool_loop, client, *called)
-            results[3].detail = f"{TOOL_NAME} called with order_id {ORDER_ID}"
         attempt(5, check_anthropic, client)
         attempt(6, check_thinking, client)
         if mtp_on:
@@ -282,8 +288,6 @@ def _run(ctx):
             skip(7, "MTP is off in this profile")
         attempt(8, check_auth, client)
 
-    for n in range(1, 9):
-        ctx.say(results[n].line())
     ctx.say(f"Log: {log.path}")
     failed = [results[n] for n in range(1, 9) if results[n].status == "FAIL"]
     if not failed:
