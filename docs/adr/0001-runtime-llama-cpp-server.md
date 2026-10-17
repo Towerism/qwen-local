@@ -1,6 +1,6 @@
 # ADR 0001: Serve the model with llama.cpp's llama-server, not Ollama
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-16)
 - **Date:** 2026-10-16
 
 ## Decision

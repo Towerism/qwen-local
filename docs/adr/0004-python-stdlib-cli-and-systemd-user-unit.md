@@ -1,6 +1,6 @@
 # ADR 0004: One Python standard-library CLI (`qlm`) and a systemd user service
 
-- **Status:** Proposed
+- **Status:** Accepted (2026-10-16)
 - **Date:** 2026-10-16
 
 ## Decision
