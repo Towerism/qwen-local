@@ -397,5 +397,7 @@ def run(ctx, command, **kwargs):
         return command(ctx, **kwargs)
     except Stop as stop_:
         return ctx.fail(stop_.what, stop_.todo)
+    except BrokenPipeError:
+        raise  # the reader went away (qlm status | head); cli.main ends quietly
     except OSError as e:
         return ctx.fail(f"file error: {e}", "Fix the cause and try again")

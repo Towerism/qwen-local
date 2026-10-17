@@ -1,6 +1,7 @@
 """Command-line entry point. Exit codes: 0 ok, 1 a check or step failed, 2 usage error."""
 
 import argparse
+import os
 import sys
 
 from qlm import pins
@@ -66,7 +67,20 @@ def main(argv=None, ctx=None):
         from qlm.system import default_ctx
 
         ctx = default_ctx()
+    try:
+        return _dispatch(args, ctx)
+    except BrokenPipeError:
+        # Whoever read our output stopped early. Point stdout at /dev/null so the
+        # interpreter's final flush doesn't raise again, and end without a message.
+        if ctx.out is sys.stdout:
+            try:
+                os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stdout.fileno())
+            except (OSError, ValueError):
+                pass
+        return 1
 
+
+def _dispatch(args, ctx):
     if args.command == "doctor":
         from qlm import doctor
 

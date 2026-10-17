@@ -224,6 +224,8 @@ def run(ctx):
         return _run(ctx)
     except service.Stop as stop:
         return ctx.fail(stop.what, stop.todo)
+    except BrokenPipeError:
+        raise
     except OSError as e:
         return ctx.fail(f"file error: {e}", "Fix the cause and try again")
 

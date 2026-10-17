@@ -67,6 +67,20 @@ def test_unknown_option_is_a_usage_error(home, repo):
     assert cli.main(["fetch", "--nope"], ctx) == 2
 
 
+def test_a_closed_output_pipe_ends_quietly(home, repo):
+    class ClosedPipe:
+        def write(self, text):
+            raise BrokenPipeError(32, "Broken pipe")
+
+        def flush(self):
+            raise BrokenPipeError(32, "Broken pipe")
+
+    ctx = make_ctx(home, repo)
+    ctx.out = ClosedPipe()
+    assert cli.main(["con", "--print"], ctx) == 1
+    assert "file error" not in ctx.err.getvalue()
+
+
 def test_install_rejects_other_tags_before_running_anything(home, repo):
     ctx = make_ctx(home, repo)
     assert cli.main(["install", "--tag", "b11670"], ctx) == 2
