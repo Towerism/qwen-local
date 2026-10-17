@@ -262,14 +262,20 @@ def apply(ctx):
     return 0
 
 
-def _newest_backup(ctx):
+def _backups(ctx):
+    """The .bak and .absent backups, oldest first: by stamp, then by clash suffix."""
     d = ctx.paths.backups
     found = []
     for p in d.iterdir() if d.exists() else []:
         m = BACKUP.match(p.name)
         if m:
             found.append(((m.group(1), int(m.group(2) or 0)), p))
-    return max(found)[1] if found else None
+    return [p for _, p in sorted(found)]
+
+
+def _newest_backup(ctx):
+    found = _backups(ctx)
+    return found[-1] if found else None
 
 
 def revert(ctx):
@@ -282,7 +288,8 @@ def revert(ctx):
     stamp = _stamp(ctx)
     d = _backups_dir(ctx)
     if target.exists():
-        files.create_new(d, lambda n: f"con.conf.{files.stamped(stamp, n)}.pre-revert", target.read_bytes())
+        saved = files.create_new(d, lambda n: f"con.conf.{files.stamped(stamp, n)}.pre-revert", target.read_bytes())
+        ctx.say(f"Saved the file being replaced as {saved}.")
     if backup.name.endswith(".absent"):
         if target.exists():
             target.unlink()
@@ -292,6 +299,11 @@ def revert(ctx):
         target.parent.mkdir(parents=True, exist_ok=True)
         _write(target, backup.read_bytes(), mode)
         ctx.say(f"Restored {ctx.paths.con_conf} from {backup.name}.")
+    older = len(_backups(ctx)) - 1
+    if older:
+        # Running --revert again picks this same backup, so say where the earlier ones are.
+        plural = "backup" if older == 1 else "backups"
+        ctx.say(f"{older} older {plural} remain in {ctx.paths.backups}; copy one over con.conf by hand to go further back.")
     ctx.say("Con picks up the change the next time it starts.")
     return 0
 
@@ -317,6 +329,8 @@ def _prepare_ollama(ctx):
     names = _ollama_names(r.stdout)
     if f"{SUGGEST_NAME}:latest" in names:
         shown = ctx.runner.run(["ollama", "show", SUGGEST_NAME, "--modelfile"], timeout=TIMEOUT_S)
+        if shown.code != 0:
+            raise service.Stop(f"ollama show {SUGGEST_NAME} failed: {shown.output.strip()}", "Check Ollama and try again")
         if CPU_ONLY not in [l.strip() for l in shown.stdout.splitlines()]:
             raise service.Stop(
                 f"the existing Ollama model {SUGGEST_NAME} isn't limited to the CPU, so it could take VRAM",
@@ -328,7 +342,8 @@ def _prepare_ollama(ctx):
         code = ctx.runner.passthrough(["ollama", "pull", SUGGEST_BASE])
         if code != 0:
             raise service.Stop(f"ollama pull {SUGGEST_BASE} failed (exit {code})", "Check Ollama and try again")
-    with tempfile.TemporaryDirectory(prefix="qlm-suggest-") as tmp:
+    ctx.paths.state_dir.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix="suggest-", dir=ctx.paths.state_dir) as tmp:  # qlm writes only under home
         modelfile = Path(tmp) / "Modelfile"
         modelfile.write_text(f"FROM {SUGGEST_BASE}\n{CPU_ONLY}\n")
         r = ctx.runner.run(["ollama", "create", SUGGEST_NAME, "-f", modelfile], timeout=300)

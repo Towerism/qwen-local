@@ -466,6 +466,49 @@ def test_enable_refuses_an_existing_model_that_could_use_the_gpu(home, repo):
     assert text_of(home) == before
 
 
+def test_a_failed_ollama_show_is_reported_without_advising_removal(home, repo):
+    write_conf(home, ORIGINAL)
+    run = runner({
+        OLLAMA_LIST: ok(LIST_HEADER + "con-suggest:latest  1a2b3c4d5e6f  986 MB  1 day ago\n"),
+        OLLAMA_SHOW: fail(stderr="Error: timed out"),
+    })
+    ctx = ctx_for(home, repo, run=run)
+    assert cli.main(["suggest", "--enable"], ctx) == 1
+    assert "timed out" in output(ctx) and "ollama rm" not in output(ctx)
+
+
+def test_the_modelfile_is_written_under_the_home_directory(home, repo):
+    write_conf(home, ORIGINAL)
+    seen = {}
+
+    def create(argv):
+        seen["path"] = argv[argv.index("-f") + 1]
+        return ok()
+
+    ctx = ctx_for(home, repo, run=runner({OLLAMA_CREATE: create}))
+    assert cli.main(["suggest", "--enable"], ctx) == 0
+    assert seen["path"].startswith(str(home) + "/")
+
+
+def test_two_applies_in_one_second_keep_both_backups(home, repo):
+    write_conf(home, ORIGINAL)
+    cli.main(["con", "--apply"], ctx_for(home, repo))
+    write_conf(home, ORIGINAL)
+    cli.main(["con", "--apply"], ctx_for(home, repo))
+    assert backups(home) == ["con.conf.20261017T120000Z-1.bak", "con.conf.20261017T120000Z.bak"]
+
+
+def test_revert_says_where_the_replaced_file_and_older_backups_are(home, repo):
+    write_conf(home, ["current = 1"])
+    make_backup(home, "con.conf.20261017T100000Z.bak", b"ten = 1\n")
+    make_backup(home, "con.conf.20261017T110000Z.bak", b"eleven = 1\n")
+    ctx = ctx_for(home, repo)
+    assert cli.main(["con", "--revert"], ctx) == 0
+    text = output(ctx)
+    assert "con.conf.20261017T120000Z.pre-revert" in text
+    assert "1 older backup" in text and str(home / ".local/state/qlm/backups") in text
+
+
 @pytest.mark.parametrize("ollama", [{OLLAMA_LIST: fail(stderr="could not connect")}, {"which": {"ollama": None}}])
 def test_enable_needs_a_running_ollama(home, repo, ollama):
     write_conf(home, ORIGINAL)

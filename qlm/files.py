@@ -35,6 +35,8 @@ def create_new(directory, name_for, data=b"", mode=0o600):
             continue
         with os.fdopen(fd, "wb") as f:
             f.write(data)
+            f.flush()
+            os.fsync(f.fileno())  # a backup must be on disk before the file it backs up is replaced
         return path
     raise FileExistsError(f"no free file name in {directory}")
 
