@@ -324,3 +324,60 @@ def test_hashing_reads_in_bounded_chunks(tmp_path, monkeypatch):
     monkeypatch.setattr(fetch, "_open_for_hash", lambda path: Spy(real_open(path, "rb")))
     assert fetch.sha256_of(p) == hashlib.sha256(b"a" * (20 * 2**20)).hexdigest()
     assert sizes and max(sizes) <= 8 * 2**20 and -1 not in sizes
+
+
+def test_redirect_status_leaves_the_part_untouched(home, repo, pinned):
+    files, contents, urls = pinned
+    (models(home) / files[1].local_name).write_bytes(contents[files[1].local_name])
+    part = models(home) / (files[0].local_name + ".part")
+    part.write_bytes(contents[files[0].local_name][:2000])
+    http = FakeHttp(urls, status=302)
+    ctx = make_ctx(home, repo, http=http)
+
+    assert cli.main(["fetch"], ctx) == 1
+    assert part.read_bytes() == contents[files[0].local_name][:2000]
+    assert len(http.requests) == 6
+
+
+def test_partial_response_starting_elsewhere_is_not_appended(home, repo, pinned):
+    files, contents, urls = pinned
+    f = files[0]
+    data = contents[f.local_name]
+    (models(home) / files[1].local_name).write_bytes(contents[files[1].local_name])
+    part = models(home) / (f.local_name + ".part")
+    part.write_bytes(data[:1000])
+
+    class WrongRange(FakeHttp):
+        def get(self, url, range_start=None, timeout_s=60):
+            resp = super().get(url, range_start, timeout_s)
+            if resp.status == 206 and len(self.requests) == 1:
+                resp.headers["content-range"] = f"bytes 0-{len(data) - 1}/{len(data)}"
+            return resp
+
+    ctx = make_ctx(home, repo, http=WrongRange(urls))
+    assert cli.main(["fetch"], ctx) == 0
+    assert (models(home) / f.local_name).read_bytes() == data
+    assert ctx.clock.sleeps == [2]
+
+
+def test_unexpected_os_error_ends_with_a_summary_line(home, repo, pinned, monkeypatch):
+    files, contents, urls = pinned
+
+    def write(fh, chunk):
+        raise OSError(5, "Input/output error")
+
+    monkeypatch.setattr(fetch, "_write", write)
+    code, ctx = run_fetch(home, repo, FakeHttp(urls))
+    assert code == 1
+    assert ctx.err.getvalue().rstrip().splitlines()[-1].startswith("qlm: ")
+
+
+def test_progress_restarts_counting_after_a_full_restart(home, repo, pinned):
+    files, contents, urls = pinned
+    (models(home) / files[1].local_name).write_bytes(contents[files[1].local_name])
+    (models(home) / (files[0].local_name + ".part")).write_bytes(b"s" * 1000)
+    http = FakeHttp(urls, ranges=False, chunk=10)
+    code, ctx = run_fetch(home, repo, http, env=FakeEnv(tty=True))
+    lines = [l for l in ctx.err.getvalue().splitlines() if l.startswith(files[0].local_name) and l.endswith("%")]
+    assert code == 0
+    assert lines[0].endswith(" 0%") and len(lines) <= 101

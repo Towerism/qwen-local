@@ -7,6 +7,7 @@ import errno
 import hashlib
 import http.client
 import os
+import re
 
 from qlm import pins
 from qlm.system import RedirectRefused
@@ -40,6 +41,13 @@ def _write(fh, chunk):
 
 
 def run(ctx, vision=False):
+    try:
+        return _run(ctx, vision)
+    except OSError as e:
+        return ctx.fail(f"file error: {e}", "Check the path and disk, then run qlm fetch again")
+
+
+def _run(ctx, vision):
     models = ctx.paths.models
     models.mkdir(parents=True, exist_ok=True)
     wanted = pins.files(vision)
@@ -125,11 +133,18 @@ def _attempt(ctx, f, url, part, offset, progress):
 
     if resp.status == 416:
         return False, None
-    if resp.status in (404, 403) or 400 <= resp.status < 500:
+    if 400 <= resp.status < 500:
         raise _FileFailed(f"HTTP {resp.status} from {url}")
-    if resp.status >= 500:
+    if resp.status == 200:
+        mode = "wb"
+        progress.restart()
+    elif resp.status == 206:
+        start = _range_start(resp.headers)
+        if start != offset:
+            return False, f"the server answered a resume from byte {offset} with a range starting at {start}"
+        mode = "ab"
+    else:
         return False, f"HTTP {resp.status} from the server"
-    mode = "ab" if resp.status == 206 and offset else "wb"
 
     got = False
     with open(part, mode) as fh:
@@ -151,10 +166,18 @@ def _attempt(ctx, f, url, part, offset, progress):
             progress.update(fh.tell())
 
 
+def _range_start(headers):
+    m = re.match(r"bytes (\d+)-", headers.get("content-range", ""))
+    return int(m.group(1)) if m else None
+
+
 class _Progress:
     def __init__(self, ctx, f):
         self.ctx, self.f, self.last = ctx, f, None
         self.enabled = ctx.env.is_tty("stderr")
+
+    def restart(self):
+        self.last = None
 
     def update(self, done):
         if not self.enabled:
