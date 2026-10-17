@@ -23,7 +23,27 @@ def build_parser():
     install.add_argument("--rebuild", action="store_true", help="build again even if this tag is installed")
     fetch = sub.add_parser("fetch", help="download and verify the pinned model files")
     fetch.add_argument("--vision", action="store_true", help="also fetch the vision projector")
+    profile = sub.add_parser("profile", help="switch the server profile")
+    profile_sub = profile.add_subparsers(dest="action", metavar="<action>", parser_class=_Parser)
+    profile_sub.required = True
+    use = profile_sub.add_parser("use", help="make a profile active; restarts the server if it is running")
+    use.add_argument("name", help="a profile in profiles/, such as agent, long or vision")
+    sub.add_parser("start", help="start the server after checking VRAM, and wait until it is ready")
+    sub.add_parser("stop", help="stop the server")
+    sub.add_parser("status", help="show the server's state, profile, VRAM and context use")
+    logs = sub.add_parser("logs", help="show the server's journal")
+    logs.add_argument("-n", dest="lines", type=_positive_int, default=50, help="number of lines (default 50)")
+    logs.add_argument("-f", dest="follow", action="store_true", help="keep following new lines")
     return parser
+
+
+def _positive_int(text):
+    if not text.isdigit() or int(text) < 1:
+        raise argparse.ArgumentTypeError(f"expected a whole number of at least 1, got {text!r}")
+    return int(text)
+
+
+SERVICE_COMMANDS = {"start", "stop", "status", "logs"}
 
 
 def main(argv=None, ctx=None):
@@ -55,4 +75,18 @@ def main(argv=None, ctx=None):
         from qlm import fetch
 
         return fetch.run(ctx, vision=args.vision)
+    if args.command == "profile":
+        from qlm import profiles, service
+
+        names = sorted(profiles.load_all(ctx.paths.profiles_dir))
+        if args.name not in names:
+            print(f"qlm: no profile named {args.name!r}. Choose one of: {', '.join(names)}.", file=ctx.err)
+            return 2
+        return service.run(ctx, service.profile_use, name=args.name)
+    if args.command in SERVICE_COMMANDS:
+        from qlm import service
+
+        if args.command == "logs":
+            return service.logs(ctx, lines=args.lines, follow=args.follow)
+        return service.run(ctx, getattr(service, args.command))
     return 2
