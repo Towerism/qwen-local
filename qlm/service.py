@@ -25,6 +25,7 @@ TIMEOUT_S = 10
 FILE_KEYS = ("LLAMA_ARG_MODEL", "LLAMA_ARG_SPEC_DRAFT_MODEL", "LLAMA_ARG_MMPROJ")
 RUNNING_STATES = ("active", "activating")
 STATE_LABELS = {"inactive": "stopped", "failed": "failed", "deactivating": "stopping"}
+PROCESSOR = re.compile(r"\s\d+%(?:/\d+%)?\s+(CPU/GPU|GPU|CPU)(?:\s|$)")
 
 
 class Stop(Exception):
@@ -151,7 +152,11 @@ def check_ollama(ctx):
     r = ctx.runner.run(["ollama", "ps"], timeout=TIMEOUT_S)
     if r.code != 0:
         return  # a stopped daemon holds no VRAM
-    on_gpu = [line.split()[0] for line in r.stdout.splitlines()[1:] if line.strip() and "GPU" in line]
+    on_gpu = []
+    for line in r.stdout.splitlines()[1:]:
+        processor = PROCESSOR.search(line)  # "100% GPU", "100% CPU" or "48%/52% CPU/GPU"; not the model name
+        if processor and "GPU" in processor.group(1):
+            on_gpu.append(line.split()[0])
     if on_gpu:
         for name in on_gpu:
             ctx.warn(f"Ollama has {name} on the GPU; free it with: ollama stop {name}")

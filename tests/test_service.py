@@ -293,6 +293,28 @@ def test_not_enough_vram_lists_who_holds_it(home, repo):
     assert run.ran(*START) == []
 
 
+def test_only_the_processor_column_decides_gpu_use(home, repo):
+    install(home, repo)
+    listing = (
+        "NAME                 ID        SIZE      PROCESSOR    CONTEXT    UNTIL\n"
+        "my-GPU-helper:1b     a1b2c3    1.0 GB    100% CPU     4096       4 minutes from now\n"
+    )
+    run = runner({OLLAMA_PS: ok(listing), SHOW: [unit(), unit("active", "running", 4321, f"@{NOW_UNIX}")]})
+    ctx = ctx_for(home, repo, run=run)
+    assert cli.main(["start"], ctx) == 0
+
+
+def test_a_split_cpu_gpu_model_still_blocks(home, repo):
+    install(home, repo)
+    listing = (
+        "NAME            ID        SIZE      PROCESSOR          CONTEXT    UNTIL\n"
+        "qwen3:14b       a1b2c3    9.0 GB    48%/52% CPU/GPU    4096       4 minutes from now\n"
+    )
+    ctx = ctx_for(home, repo, run=runner({OLLAMA_PS: ok(listing)}))
+    assert cli.main(["start"], ctx) == 1
+    assert "ollama stop qwen3:14b" in out(ctx)
+
+
 def test_just_enough_vram_starts(home, repo):
     install(home, repo)
     run = runner({SMI_GPU: gpu(24564, 3000), SHOW: [unit(), unit("active", "running", 4321, f"@{NOW_UNIX}")]})
