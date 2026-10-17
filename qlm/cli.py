@@ -31,6 +31,7 @@ def build_parser():
     sub.add_parser("start", help="start the server after checking VRAM, and wait until it is ready")
     sub.add_parser("stop", help="stop the server")
     sub.add_parser("status", help="show the server's state, profile, VRAM and context use")
+    sub.add_parser("smoke", help="run eight API checks against the running server")
     logs = sub.add_parser("logs", help="show the server's journal")
     logs.add_argument("-n", dest="lines", type=_positive_int, default=50, help="number of lines (default 50)")
     logs.add_argument("-f", dest="follow", action="store_true", help="keep following new lines")
@@ -83,6 +84,10 @@ def main(argv=None, ctx=None):
             print(f"qlm: no profile named {args.name!r}. Choose one of: {', '.join(names)}.", file=ctx.err)
             return 2
         return service.run(ctx, service.profile_use, name=args.name)
+    if args.command == "smoke":
+        from qlm import smoke
+
+        return smoke.run(ctx)
     if args.command in SERVICE_COMMANDS:
         from qlm import service
 

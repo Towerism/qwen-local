@@ -1,0 +1,6 @@
+{"choices": [{"finish_reason": "stop", "index": 0,
+  "message": {"role": "assistant", "content": "1, 2, 3, 4, 5, 6, 7, 8, 9, 10"}}],
+ "created": 1792238403, "model": "qwen3.8-27b", "object": "chat.completion",
+ "usage": {"completion_tokens": 230, "prompt_tokens": 35, "total_tokens": 265},
+ "timings": {"cache_n": 0, "prompt_n": 35, "prompt_ms": 18.0, "predicted_n": 230, "predicted_ms": 1900.0,
+             "draft_n": 180, "draft_n_accepted": 152}}

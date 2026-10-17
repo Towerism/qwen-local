@@ -1,0 +1,8 @@
+{"choices": [{"finish_reason": "tool_calls", "index": 0,
+  "message": {"role": "assistant", "content": "",
+              "reasoning_content": "The user wants the status of order A-7731. I should call lookup_order.",
+              "tool_calls": [{"type": "function", "id": "call_8f2a",
+                              "function": {"name": "lookup_order", "arguments": "{\"order_id\": \"A-7731\"}"}}]}}],
+ "created": 1792238400, "model": "qwen3.8-27b", "object": "chat.completion",
+ "usage": {"completion_tokens": 41, "prompt_tokens": 310, "total_tokens": 351},
+ "timings": {"cache_n": 0, "prompt_n": 310, "prompt_ms": 160.2, "predicted_n": 41, "predicted_ms": 420.5}}

@@ -175,7 +175,7 @@ def check_vram(ctx, profile, credit_mib=0):
 # Starting and waiting
 
 
-def _health(ctx):
+def health_status(ctx):
     try:
         return ctx.http.request("GET", f"{SERVER}/health", timeout_s=HEALTH_TIMEOUT_S).status
     except ServerUnreachable:
@@ -188,7 +188,7 @@ def _wait_ready(ctx, t0, polled=False):
     polled=True means the caller's own /health check was the first poll and wasn't 200.
     """
     while True:
-        if not polled and _health(ctx) == 200:
+        if not polled and health_status(ctx) == 200:
             return unit_state(ctx)
         polled = False
         state = unit_state(ctx)
@@ -250,7 +250,7 @@ def start(ctx):
     state = unit_state(ctx)
     name = active_profile_name(ctx)
     if state.running:
-        if _health(ctx) == 200:
+        if health_status(ctx) == 200:
             ctx.say(f"qlm-server is already running with the {name} profile.")
             return 0
         ready = _wait_ready(ctx, t0, polled=True)
@@ -349,7 +349,7 @@ def status(ctx):
     if not ctx.paths.unit_file.exists():
         raise Stop("the qlm-server unit is not installed", "Run qlm install")
     state = unit_state(ctx)
-    ready = state.running and _health(ctx) == 200
+    ready = state.running and health_status(ctx) == 200
     label = "running" if ready else "loading" if state.running else STATE_LABELS.get(state.active, state.active)
     ctx.say(f"state: {label}")
     try:

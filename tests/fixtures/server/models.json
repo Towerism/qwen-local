@@ -1,0 +1,4 @@
+{"models": [{"name": "qwen3.8-27b", "model": "qwen3.8-27b", "type": "model", "capabilities": ["completion"]}],
+ "object": "list",
+ "data": [{"id": "qwen3.8-27b", "aliases": ["qwen3.8-27b"], "object": "model", "owned_by": "llamacpp",
+           "meta": {"n_ctx": 65536, "n_ctx_train": 262144}}]}

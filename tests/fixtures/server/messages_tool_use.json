@@ -1,0 +1,5 @@
+{"id": "msg_01", "type": "message", "role": "assistant", "model": "qwen3.8-27b",
+ "content": [{"type": "thinking", "thinking": "I should call lookup_order for A-7731.", "signature": ""},
+             {"type": "tool_use", "id": "toolu_01", "name": "lookup_order", "input": {"order_id": "A-7731"}}],
+ "stop_reason": "tool_use", "stop_sequence": null,
+ "usage": {"cache_read_input_tokens": 0, "input_tokens": 300, "output_tokens": 40}}

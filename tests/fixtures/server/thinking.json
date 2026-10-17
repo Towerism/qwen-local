@@ -1,0 +1,6 @@
+{"choices": [{"finish_reason": "stop", "index": 0,
+  "message": {"role": "assistant", "content": "391",
+              "reasoning_content": "17 times 23: 17 times 20 is 340, plus 17 times 3 is 51, total 391."}}],
+ "created": 1792238402, "model": "qwen3.8-27b", "object": "chat.completion",
+ "usage": {"completion_tokens": 60, "prompt_tokens": 30, "total_tokens": 90},
+ "timings": {"cache_n": 0, "prompt_n": 30, "prompt_ms": 15.0, "predicted_n": 60, "predicted_ms": 600.0}}
