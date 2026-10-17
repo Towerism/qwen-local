@@ -19,6 +19,7 @@ CMAKE_FLAGS = (
 BINARIES = ("llama-server", "llama-bench")
 UNSUPPORTED_COMPILER = re.compile(r"unsupported (gnu version|host compiler)", re.I)
 TAIL_LINES = 30
+GCC15 = "/usr/bin/g++-15"
 
 
 class _Stop(Exception):
@@ -69,6 +70,8 @@ def run(ctx, rebuild=False):
         _write_private_files(ctx)
     except _Stop as stop:
         return ctx.fail(stop.what, stop.todo)
+    except OSError as e:
+        return ctx.fail(f"file error: {e}", "Nothing after this step was changed; fix the cause and run qlm install again")
     if (built or switched) and _server_pid(ctx):
         ctx.say("qlm-server is running; the new build takes effect at the next start.")
     ctx.say("Install complete.")
@@ -94,6 +97,8 @@ class _Log:
                 break
             except FileExistsError:
                 continue
+        else:
+            raise _Stop(f"could not create a new log file in {ctx.paths.logs}", "Remove old install logs and try again")
         self.path = path
         self.file = os.fdopen(fd, "w")
         self.ctx = ctx
@@ -126,7 +131,10 @@ def _build(ctx, tag, required, bin_dir, log):
     p = ctx.paths
     src = p.llama_src
     if (src / ".git").exists():
-        log.step(f"Fetching tag {tag}", ["git", "-C", src, "fetch", "--force", "origin", f"refs/tags/{tag}:refs/tags/{tag}"])
+        log.step(
+            f"Fetching tag {tag}",
+            ["git", "-C", src, "fetch", "--force", pins.LLAMA_REPO_URL, f"refs/tags/{tag}:refs/tags/{tag}"],
+        )
     else:
         src.parent.mkdir(parents=True, exist_ok=True)
         log.step("Cloning llama.cpp", ["git", "clone", "--no-recurse-submodules", pins.LLAMA_REPO_URL, src])
@@ -151,12 +159,11 @@ def _build(ctx, tag, required, bin_dir, log):
         if not UNSUPPORTED_COMPILER.search(first.output):
             log.show_tail(first)
             raise _Stop("configuring the build failed", f"See the full log at {log.path}")
-        gcc15 = ctx.runner.which("g++-15")
-        if not gcc15:
+        if not ctx.runner.which(GCC15):
             log.show_tail(first)
             raise _Stop("nvcc rejected the host compiler and g++-15 is not installed", "Install the gcc15 package and run qlm install again")
         shutil.rmtree(build, ignore_errors=True)
-        log.step("Configuring again with g++-15", [*configure, f"-DCMAKE_CUDA_HOST_COMPILER={gcc15}"])
+        log.step("Configuring again with g++-15", [*configure, f"-DCMAKE_CUDA_HOST_COMPILER={GCC15}"])
 
     log.step("Building llama-server and llama-bench", ["cmake", "--build", build, "--target", *BINARIES, "-j", str(ctx.env.cpu_count())])
 
@@ -220,6 +227,9 @@ def _write_private_files(ctx):
     p = ctx.paths
     p.config_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(p.config_dir, 0o700)
+    for path in (p.active_env, p.api_key):
+        if path.exists() and path.stat().st_size == 0:
+            raise _Stop(f"{path} is empty", "Delete it and run qlm install again to create a new one")
     if not p.active_env.exists():
         agent = profiles.load(p.profiles_dir / "agent.env")
         _create_private(p.active_env, agent.render(p.home))
@@ -228,9 +238,17 @@ def _write_private_files(ctx):
 
 
 def _create_private(path, text):
-    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "w") as f:
-        f.write(text)
+    """Write owner-only to a temporary file, then hard-link it into place, so `path` never exists half-written."""
+    tmp = path.with_name(f".{path.name}.tmp-{os.getpid()}")
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+            f.flush()
+            os.fsync(f.fileno())
+        os.link(tmp, path)
+    finally:
+        tmp.unlink()
 
 
 def _server_pid(ctx):

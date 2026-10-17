@@ -60,7 +60,7 @@ class Machine:
             ("systemctl", "--user", "daemon-reload"): ok(),
             ("systemctl", "--user", "show", "-p", "MainPID", "--value", "qlm-server"): ok("0\n"),
         }
-        self.runner = FakeRunner(script, {"g++-15": "/usr/bin/g++-15"} if which is None else which)
+        self.runner = FakeRunner(script, {"g++-15": "/usr/bin/g++-15", "/usr/bin/g++-15": "/usr/bin/g++-15"} if which is None else which)
 
     def install(self, *args):
         ctx = make_ctx(self.home, self.repo, runner=self.runner)
@@ -105,7 +105,7 @@ def test_existing_checkout_fetches_the_tag_instead_of_cloning(home, repo):
     assert code == 0
     assert m.runner.ran("git", "clone") == []
     fetch = m.runner.ran("git", "-C", str(m.paths.llama_src), "fetch")[0]
-    assert fetch[-3:] == ["--force", "origin", f"refs/tags/{TAG}:refs/tags/{TAG}"]
+    assert fetch[-3:] == ["--force", pins.LLAMA_REPO_URL, f"refs/tags/{TAG}:refs/tags/{TAG}"]
 
 
 def test_unsupported_host_compiler_retries_with_gcc15(home, repo):
@@ -293,3 +293,61 @@ def test_two_runs_in_the_same_second_get_separate_logs(home, repo):
     assert m.install()[0] == 0
     assert Machine(home, repo).install("--rebuild")[0] == 0
     assert len(list(m.paths.logs.glob("install-*.log"))) == 2
+
+
+def test_empty_key_file_is_reported_not_trusted(home, repo):
+    m = Machine(home, repo)
+    m.paths.config_dir.mkdir(parents=True)
+    m.paths.api_key.write_text("")
+    code, ctx = m.install()
+    assert code == 1
+    assert str(m.paths.api_key) in ctx.err.getvalue() and "empty" in ctx.err.getvalue()
+
+
+def test_private_files_never_exist_half_written(home, repo, monkeypatch):
+    m = Machine(home, repo)
+    real_link = os.link
+    seen = {}
+
+    def link(src, dst):
+        seen[str(dst)] = (os.path.getsize(src), oct(stat.S_IMODE(os.stat(src).st_mode)))
+        real_link(src, dst)
+
+    monkeypatch.setattr(os, "link", link)
+    assert m.install()[0] == 0
+    assert seen[str(m.paths.api_key)] == (43, "0o600")
+    assert seen[str(m.paths.active_env)][1] == "0o600"
+    assert [p.name for p in m.paths.config_dir.iterdir()] and not [p for p in m.paths.config_dir.iterdir() if p.name.startswith(".")]
+
+
+def test_copy_failure_ends_with_a_summary_line(home, repo, monkeypatch):
+    import shutil
+
+    m = Machine(home, repo)
+
+    def copy(*a, **k):
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(shutil, "copyfile", copy)
+    code, ctx = m.install()
+    assert code == 1
+    last = ctx.err.getvalue().rstrip().splitlines()[-1]
+    assert last.startswith("qlm: ") and "No space left" in last
+
+
+def test_current_that_is_a_real_directory_fails_cleanly(home, repo):
+    m = Machine(home, repo)
+    (m.paths.llama_current / "stuff").mkdir(parents=True)
+    code, ctx = m.install()
+    assert code == 1
+    assert ctx.err.getvalue().rstrip().splitlines()[-1].startswith("qlm: ")
+    assert (m.paths.llama_current / "stuff").is_dir()
+
+
+def test_fallback_compiler_is_the_literal_usr_bin_path(home, repo):
+    def configure(argv):
+        return fail(stderr="unsupported GNU version") if len(m.runner.ran(*CONFIGURE)) == 1 else ok()
+
+    m = Machine(home, repo, configure=configure, which={"g++-15": "/opt/elsewhere/g++-15", "/usr/bin/g++-15": "/usr/bin/g++-15"})
+    assert m.install()[0] == 0
+    assert "-DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-15" in m.runner.ran(*CONFIGURE)[1]
