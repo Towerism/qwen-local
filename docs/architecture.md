@@ -2,7 +2,7 @@
 
 `qlm` is a command-line tool that installs, runs, checks and tunes Qwen3.8-27B (Q4_K_M) on this one machine, as the local backend for the Con terminal. This document says what the tool is made of and how the parts fit. Use it to review the design before any code is written, and to settle questions later. The reasons behind each choice are in the ADRs it links to.
 
-- **Status:** Draft, awaiting review
+- **Status:** Accepted (2026-10-16)
 - **Date:** 2026-10-16
 - **Machine:** i9-13900KF (no iGPU), 62 GiB DDR5, NVIDIA RTX 4090 with 24,564 MiB of video memory (VRAM) (compute capability 8.9), driver 615.78, CUDA (NVIDIA's GPU toolkit) 13.4, Arch Linux
 
@@ -63,8 +63,8 @@ Each command does one job and exits non-zero on failure with a message that name
 | Command | What it does | Done when |
 |---|---|---|
 | `qlm doctor` | Read-only preflight: driver and `nvidia-smi`, `nvcc` and host compiler, disk space, port 9931 free, models loaded in Ollama, VRAM held by other processes, `~/.local/bin` on `PATH`, Con config keys | Prints a pass/fail line per check |
-| `qlm install [--tag b11669]` | Clone or fetch llama.cpp, check out the tag, build with `-DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=89`, retrying with `NVCC_CCBIN=/usr/bin/g++-15` if `nvcc` rejects GCC 16. Check that the tag resolves to the commit recorded in ADR 0001, and stop if it doesn't. Install the unit and symlink, write the `agent` profile to `active.env`, and create the API key file (ADR 0003). | `llama-server --help` lists every variable the profiles use, and `draft-mtp` among the `--spec-type` values |
-| `qlm fetch [--vision]` | Download the model and MTP files with resume from the pinned Hugging Face revision (`/resolve/<revision>/`), then check SHA-256 against the hashes recorded in ADR 0002, not hashes fetched at download time. `--vision` adds `mmproj-BF16.gguf`. | All hashes match the recorded ones |
+| `qlm install [--tag b11669] [--rebuild]` | Resolve the tag to its commit and stop unless it matches ADR 0001, then check out that commit, build with `-DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=89 -DBUILD_SHARED_LIBS=OFF`, and retry the configure step with `-DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-15` if `nvcc` rejects the host compiler. Copy the new binaries in under staged names; they replace the old ones only after the `--help` check passes. Then switch `current`, install the unit and symlink, write the `agent` profile to `active.env`, and create the API key file (ADR 0003). An installed tag skips the build unless `--rebuild` is given. `--tag` accepts only the pinned tag until `qlm update` exists. | `llama-server --help` lists every variable the profiles use as `(env: NAME)`, and `draft-mtp` among the `--spec-type` values |
+| `qlm fetch [--vision]` | Download the model and MTP files with resume from the pinned Hugging Face revision (`/resolve/<revision>/`), then check SHA-256 against the hashes recorded in ADR 0002, not hashes fetched at download time. `--vision` adds `mmproj-BF16.gguf`. After a run in which every file verified, write `SHA256SUMS`. | All hashes match the recorded ones |
 | `qlm profile use <agent\|long\|vision>` | Render `active.env` from `profiles/<name>.env`; restart the service if it is running | `active.env` matches the profile |
 | `qlm start` | Check free VRAM (total minus used, from `nvidia-smi --query-gpu=memory.total,memory.used`) against the profile's `vram_gib` plus 0.5 GiB. Refuse if `ollama ps` shows a model using the GPU, and print the `ollama stop <name>` command. A CPU-only model such as `con-suggest` is allowed. Then start the service, wait for `/health` to return 200 (up to 180 s), and stop the unit if the wait runs out, so it doesn't keep retrying | Reports the server's VRAM and load time |
 | `qlm stop`, `qlm status`, `qlm logs` | Wrap `systemctl --user` and `journalctl --user`. `status` adds VRAM, profile, context use from `/metrics`, and uptime. | |
