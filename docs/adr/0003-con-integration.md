@@ -6,9 +6,10 @@
 ## Decision
 
 1. Con talks to llama-server through the `openaicompatible` provider at `http://127.0.0.1:9931/v1`.
-2. Sampling settings live on the server. Con sends a temperature only when `con.agent.temperature` is set, so the script leaves that key unset.
-3. Con's suggestion model (shell completions and tab labels) never uses llama-server. By default it is turned off. An opt-in setting sends it to a small model in Ollama that runs on the CPU only.
-4. `qlm con` edits `~/.config/con/con.conf` only while Con is not running, after a backup, and writes only keys confirmed in Con's source.
+2. llama-server requires an API key. `qlm install` generates a random key into `~/.config/qlm/api-key` (mode 0600), and `qlm con --apply` writes it to Con's `api_key`. Con sends a configured key even to a loopback address; it strips the `Authorization` header only when no key is set (`crates/con-agent/src/provider.rs:2477-2487`).
+3. Sampling settings live on the server. Con sends a temperature only when `con.agent.temperature` is set, so the script leaves that key unset.
+4. Con's suggestion model (shell completions and tab labels) never uses llama-server. By default it is turned off. An opt-in setting sends it to a small model in Ollama that runs on the CPU only.
+5. `qlm con` edits `~/.config/con/con.conf` only while Con is not running, after a backup, and writes only keys confirmed in Con's source.
 
 The keys it writes:
 
@@ -17,6 +18,7 @@ con.agent.provider = "openaicompatible"
 con.agent.provider_is_explicit = true
 con.agent.providers.openaicompatible.base_url = "http://127.0.0.1:9931/v1"
 con.agent.providers.openaicompatible.model = "qwen3.8-27b"
+con.agent.providers.openaicompatible.api_key = "<contents of ~/.config/qlm/api-key>"
 con.agent.suggestion_model.enabled = false
 ```
 
@@ -49,6 +51,7 @@ The opt-in setting creates an Ollama model `con-suggest` from `qwen2.5-coder:1.5
 ## Consequences
 
 - The dashed key `con.agent.providers.openai-compatible.*` is easy to write by mistake, because the dashed spelling works as a provider value. It stops Con from loading its config, so `qlm con` writes only `openaicompatible`.
-- Con rewrites `con.conf` when you change settings in its UI, so the script refuses to edit while Con runs and keeps a timestamped backup in `~/.local/state/qlm/backups/`.
+- Con rewrites `con.conf` when you change settings in its UI, so the script refuses to edit while Con runs. It finds Con with `pgrep -x con`; the binary is named `con` (`crates/con-app/Cargo.toml`, `[[bin]] name = "con"`). `con.conf` can hold API keys for other providers, so backups in `~/.local/state/qlm/backups/` are created with mode 0600, and the new file is written to a temporary file and renamed into place with the original's mode.
+- Why a key on a loopback-only server: a browser on the same desktop can send requests to `127.0.0.1`. CORS stops a page from reading replies, but not from sending simple POSTs that start generations and evict Con's cached prompt. A page can't add an `Authorization` header without passing a CORS check, so the key blocks those requests.
 - `con.agent.auto_context` has no effect in this Con build (`provider.rs:1862` defines it; nothing reads it), so the design doesn't depend on it.
 - Con can also reach llama-server through its `anthropic` provider at `/v1/messages`. That path isn't used, but `qlm smoke` tests it so it stays available as a fallback.
