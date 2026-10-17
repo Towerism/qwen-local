@@ -1,6 +1,39 @@
-{"choices": [{"finish_reason": "stop", "index": 0,
-  "message": {"role": "assistant", "content": "391",
-              "reasoning_content": "17 times 23: 17 times 20 is 340, plus 17 times 3 is 51, total 391."}}],
- "created": 1792238402, "model": "qwen3.8-27b", "object": "chat.completion",
- "usage": {"completion_tokens": 60, "prompt_tokens": 30, "total_tokens": 90},
- "timings": {"cache_n": 0, "prompt_n": 30, "prompt_ms": 15.0, "predicted_n": 60, "predicted_ms": 600.0}}
+{
+ "choices": [
+  {
+   "finish_reason": "stop",
+   "index": 0,
+   "message": {
+    "role": "assistant",
+    "content": "391",
+    "reasoning_content": "We need answer only number. User asks what is 17*23. 17*23 = 391. Final only 391.\n"
+   }
+  }
+ ],
+ "created": 1792206584,
+ "model": "qwen3.8-27b",
+ "system_fingerprint": "b11669-620d2225c",
+ "object": "chat.completion",
+ "usage": {
+  "completion_tokens": 43,
+  "prompt_tokens": 69,
+  "total_tokens": 112,
+  "prompt_tokens_details": {
+   "cached_tokens": 0
+  }
+ },
+ "id": "chatcmpl-jb5I75JNF4VfC9WozW6YwEvboG3eshNv",
+ "timings": {
+  "cache_n": 0,
+  "prompt_n": 69,
+  "prompt_ms": 164.049,
+  "prompt_per_token_ms": 2.377521739130435,
+  "prompt_per_second": 420.60603843973445,
+  "predicted_n": 43,
+  "predicted_ms": 426.392,
+  "predicted_per_token_ms": 10.152190476190476,
+  "predicted_per_second": 98.50090996078725,
+  "draft_n": 42,
+  "draft_n_accepted": 29
+ }
+}

@@ -1,4 +1,61 @@
-{"models": [{"name": "qwen3.8-27b", "model": "qwen3.8-27b", "type": "model", "capabilities": ["completion"]}],
+{
+ "models": [
+  {
+   "name": "qwen3.8-27b",
+   "model": "qwen3.8-27b",
+   "modified_at": "",
+   "size": "",
+   "digest": "",
+   "type": "model",
+   "description": "",
+   "tags": [
+    ""
+   ],
+   "capabilities": [
+    "completion"
+   ],
+   "parameters": "",
+   "details": {
+    "parent_model": "",
+    "format": "gguf",
+    "family": "",
+    "families": [
+     ""
+    ],
+    "parameter_size": "",
+    "quantization_level": ""
+   }
+  }
+ ],
  "object": "list",
- "data": [{"id": "qwen3.8-27b", "aliases": ["qwen3.8-27b"], "object": "model", "owned_by": "llamacpp",
-           "meta": {"n_ctx": 65536, "n_ctx_train": 262144}}]}
+ "data": [
+  {
+   "id": "qwen3.8-27b",
+   "aliases": [
+    "qwen3.8-27b"
+   ],
+   "tags": [],
+   "object": "model",
+   "architecture": {
+    "input_modalities": [
+     "text"
+    ],
+    "output_modalities": [
+     "text"
+    ]
+   },
+   "created": 1792206580,
+   "owned_by": "llamacpp",
+   "meta": {
+    "vocab_type": 2,
+    "n_vocab": 248320,
+    "n_ctx": 65536,
+    "n_ctx_train": 262144,
+    "n_embd": 5120,
+    "n_params": 27320697856,
+    "size": 16453443584,
+    "ftype": "Q4_K - Medium"
+   }
+  }
+ ]
+}

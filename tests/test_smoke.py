@@ -130,8 +130,8 @@ def test_the_tool_loop_sends_back_the_call_and_its_result(home, repo):
     server = make_server()
     run_smoke(home, repo, server)
     loop = server.to("POST", "/v1/chat/completions")[1]["json"]["messages"]
-    assert loop[1]["role"] == "assistant" and loop[1]["tool_calls"][0]["id"] == "call_8f2a"
-    assert loop[2]["role"] == "tool" and loop[2]["tool_call_id"] == "call_8f2a"
+    assert loop[1]["role"] == "assistant" and loop[1]["tool_calls"][0]["id"] == "OnK5fiMWpKCANWtIQbqlI87FDbb2YPlO"
+    assert loop[2]["role"] == "tool" and loop[2]["tool_call_id"] == "OnK5fiMWpKCANWtIQbqlI87FDbb2YPlO"
     assert json.loads(loop[2]["content"]) == {"order_id": "A-7731", "status": "shipped", "tracking_code": "ZQ-48213"}
 
 
@@ -225,7 +225,7 @@ def test_mtp_needs_accepted_draft_tokens(home, repo, timings):
 
 def test_mtp_detail_shows_accepted_out_of_drafted(home, repo):
     code, ctx = run_smoke(home, repo, make_server())
-    assert "152 of 180" in next(l for l in lines(ctx) if l.split()[1] == "7")
+    assert "232 of 234" in next(l for l in lines(ctx) if l.split()[1] == "7")
 
 
 def test_a_server_that_accepts_requests_without_the_key_fails(home, repo):
