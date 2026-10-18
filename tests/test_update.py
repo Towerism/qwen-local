@@ -7,8 +7,7 @@ import signal
 import pytest
 
 from qlm import cli, interrupts, pins
-from qlm.system import ServerUnreachable
-from tests.fakes import FakeClock, FakeEnv, fail, make_ctx, ok, reply
+from tests.fakes import FakeClock, FakeEnv, make_ctx, ok, reply
 from tests.test_install import help_text
 from tests.test_service import (
     OLLAMA_HEADER, OLLAMA_PS, RESET, RESTART, RUNNING, SHOW, SMI_APPS, SMI_GPU, START, STOP, apps, gpu, install,

@@ -3,8 +3,6 @@
 import os
 import shutil
 
-import pytest
-
 from qlm import cli
 from tests.fakes import FakeEnv, FakeRunner, fail, make_ctx, ok
 from tests.test_service import RESET, RUNNING, SHOW, STOP, install, unit

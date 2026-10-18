@@ -10,9 +10,9 @@ import pytest
 
 from qlm import bench, cli
 from qlm.system import ServerUnreachable
-from tests.fakes import FakeClock, FakeRunner, FakeServer, fail, make_ctx, ok, reply
+from tests.fakes import FakeClock, FakeServer, make_ctx, ok, reply
 from tests.test_service import (
-    OLLAMA_PS, RESET, RESTART, RUNNING, SHOW, SMI_APPS, SMI_GPU, STOP, apps, gpu, install, rendered, runner, unit,
+    RESTART, RUNNING, SHOW, SMI_APPS, SMI_GPU, STOP, apps, gpu, install, rendered, runner, unit,
 )
 
 KEY = "k" * 43
@@ -589,3 +589,33 @@ def test_ctrl_c_and_sigterm_are_ignored_while_the_backup_is_written(home, repo, 
     code, ctx, p = run_bench(home, repo)
     assert code == 0, out(ctx)
     assert handlers[0] == (signal.SIG_IGN, signal.SIG_IGN)  # the backup is the first file bench writes
+
+
+def test_an_mtp_off_server_that_never_gets_ready_is_restored(home, repo):
+    # /health: ready at the start, then never ready after the switch; the restore gets ready again.
+    run = bench_runner(overrides={SHOW: [RUNNING, unit("failed", "failed"), RUNNING]})
+    server = BenchServer(overrides={("GET", "/health"): [reply(200, {"status": "ok"}), reply(503, {}),
+                                                          reply(200, {"status": "ok"})]})
+    code, ctx, p = run_bench(home, repo, server=server, run=run)
+    assert code == 1
+    assert "didn't become ready with MTP off" in ctx.err.getvalue()
+    assert p.active_env.read_text() == rendered(home, repo, "agent") and not p.bench_backup.exists()
+    assert results(p) == []
+
+
+def test_when_both_the_mtp_off_start_and_the_restore_fail_both_are_reported(home, repo):
+    run = bench_runner(overrides={SHOW: [RUNNING, unit("failed", "failed")]})
+    server = BenchServer(overrides={("GET", "/health"): [reply(200, {"status": "ok"}), reply(503, {})]})
+    code, ctx, p = run_bench(home, repo, server=server, run=run)
+    assert code == 1
+    err = ctx.err.getvalue()
+    assert "didn't become ready with MTP off" in err
+    assert "qlm start" in err.rstrip().splitlines()[-1]
+    assert p.active_env.read_text() == rendered(home, repo, "agent") and not p.bench_backup.exists()
+
+
+def test_a_reply_without_timings_fails_the_measurement(home, repo):
+    server = BenchServer(overrides={("POST", "/v1/chat/completions"): reply(200, {"choices": []})})
+    code, ctx, p = run_bench(home, repo, server=server, args=("bench", "--quick"))
+    assert code == 1
+    assert "the reply has no timings" in ctx.err.getvalue()
