@@ -8,7 +8,7 @@ import os
 import re
 import shutil
 
-from qlm import pins, profiles
+from qlm import pins, profiles, service
 
 CMAKE_FLAGS = (
     "-DGGML_CUDA=ON",
@@ -59,8 +59,8 @@ def run(ctx, rebuild=False):
     try:
         built = False
         if rebuild or not _installed_and_valid(ctx, bin_dir / "llama-server", required):
-            with _Log(ctx) as log:
-                _build(ctx, tag, required, bin_dir, log)
+            with _Log(ctx, "install") as log:
+                _build(ctx, tag, pins.LLAMA_COMMIT, "ADR 0001 pins", required, bin_dir, log)
             built = True
         else:
             ctx.say(f"llama.cpp {tag} is already installed; skipping the build (use --rebuild to build again)")
@@ -85,20 +85,20 @@ def _installed_and_valid(ctx, server, required):
 
 
 class _Log:
-    """The install log, created owner-only. Never receives the API key."""
+    """The build log of `kind` (install or update), created owner-only. Never receives the API key."""
 
-    def __init__(self, ctx):
+    def __init__(self, ctx, kind):
         ctx.paths.logs.mkdir(parents=True, exist_ok=True)
         stamp = ctx.clock.now().strftime("%Y%m%dT%H%M%SZ")
         for n in range(1000):
-            path = ctx.paths.logs / (f"install-{stamp}.log" if n == 0 else f"install-{stamp}-{n}.log")
+            path = ctx.paths.logs / (f"{kind}-{stamp}.log" if n == 0 else f"{kind}-{stamp}-{n}.log")
             try:
                 fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
                 break
             except FileExistsError:
                 continue
         else:
-            raise _Stop(f"could not create a new log file in {ctx.paths.logs}", "Remove old install logs and try again")
+            raise _Stop(f"could not create a new log file in {ctx.paths.logs}", f"Remove old {kind} logs and try again")
         self.path = path
         self.file = os.fdopen(fd, "w")
         self.ctx = ctx
@@ -127,7 +127,7 @@ class _Log:
         self.ctx.warn(f"Full log: {self.path}")
 
 
-def _build(ctx, tag, required, bin_dir, log):
+def _build(ctx, tag, expected, pin_label, required, bin_dir, log):
     p = ctx.paths
     src = p.llama_src
     if (src / ".git").exists():
@@ -142,11 +142,11 @@ def _build(ctx, tag, required, bin_dir, log):
     resolved = log.step(f"Resolving {tag}", ["git", "-C", src, "rev-parse", f"refs/tags/{tag}^{{commit}}"], allow_fail=True)
     if resolved.code != 0:
         log.show_tail(resolved)
-        raise _Stop(f"tag {tag} was not found in llama.cpp", "Check the pin in ADR 0001; qlm won't fall back to another tag")
+        raise _Stop(f"tag {tag} was not found in llama.cpp", "Check the tag name; qlm won't fall back to another tag")
     commit = resolved.stdout.strip()
-    if commit != pins.LLAMA_COMMIT:
+    if commit != expected:
         raise _Stop(
-            f"tag {tag} points at {commit}, but ADR 0001 pins {pins.LLAMA_COMMIT}",
+            f"tag {tag} points at {commit}, but {pin_label} {expected}",
             "Nothing was built. Check whether the tag was moved upstream",
         )
     log.step(f"Checking out {commit[:12]}", ["git", "-C", src, "checkout", "--detach", commit])
@@ -188,6 +188,29 @@ def _build(ctx, tag, required, bin_dir, log):
                 dest.unlink()
 
 
+def build_tag(ctx, tag, commit, kind, pin_label):
+    """Build `tag` at `commit` into its own directory and check it, without touching `current`.
+
+    Raises service.Stop when a step fails; the binaries already there are only replaced after the check.
+    """
+    required = profiles.all_setting_names(ctx.paths.profiles_dir)
+    try:
+        with _Log(ctx, kind) as log:
+            _build(ctx, tag, commit, pin_label, required, ctx.paths.tag_dir(tag) / "bin", log)
+    except _Stop as stop:
+        raise service.Stop(stop.what, stop.todo) from None
+
+
+def point_current(ctx, target):
+    """Make `current` a symlink to `target` in one rename, so it never points nowhere."""
+    current = ctx.paths.llama_current
+    tmp = current.with_name(f".current.tmp-{os.getpid()}")
+    if tmp.is_symlink() or tmp.exists():
+        tmp.unlink()
+    os.symlink(target, tmp)
+    os.replace(tmp, current)
+
+
 def _switch_current(ctx, tag):
     """Point `current` at this tag, unless it already leads to another working build.
 
@@ -200,11 +223,7 @@ def _switch_current(ctx, tag):
     if current.is_symlink() and (current / "bin/llama-server").exists():
         ctx.say(f"current is on {os.path.basename(os.readlink(current))}, set by qlm update; leaving it there.")
         return False
-    tmp = current.with_name(f".current.tmp-{os.getpid()}")
-    if tmp.is_symlink() or tmp.exists():
-        tmp.unlink()
-    os.symlink(target, tmp)
-    os.replace(tmp, current)
+    point_current(ctx, target)
     ctx.say(f"{current} -> {target}")
     return True
 

@@ -228,7 +228,8 @@ NOT_READY_TODO = (
 )
 
 
-def _preflight(ctx):
+def preflight(ctx, check_port=True):
+    """qlm start's checks before a start. A running server holds the port, so callers restarting it skip that one."""
     p = ctx.paths
     if not p.unit_file.exists() or not (p.llama_current / "bin/llama-server").exists():
         raise Stop("llama-server or the qlm-server unit is not installed", "Run qlm install")
@@ -243,7 +244,7 @@ def _preflight(ctx):
     missing = missing_files(profile.settings)
     if missing:
         raise Stop("missing model file: " + ", ".join(path for _, path in missing), _fetch_hint(missing))
-    holder = ctx.env.listener_pid(HOST, PORT)
+    holder = ctx.env.listener_pid(HOST, PORT) if check_port else None
     if holder is not None:
         who = f"PID {holder}" if holder != "unknown" else "another user's process"
         raise Stop(f"port {PORT} is in use by {who}", "Stop that process or free the port")
@@ -263,7 +264,7 @@ def start(ctx):
             _give_up(ctx, t0, NOT_READY_TODO)
         _report_ready(ctx, t0, ready, name)
         return 0
-    profile = _preflight(ctx)
+    profile = preflight(ctx)
     check_ollama(ctx)
     check_vram(ctx, profile)
     _systemctl(ctx, "reset-failed", UNIT)  # clears an earlier start limit; failure here is harmless
