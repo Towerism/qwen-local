@@ -27,6 +27,7 @@ EXPECTED_FILES = [
     "qlm/update.py",
     "qlm/interrupts.py",
     "qlm/uninstall.py",
+    "qlm/bench.py",
     "profiles/agent.env",
     "profiles/long.env",
     "profiles/vision.env",
@@ -50,7 +51,7 @@ def test_help_through_symlink_from_another_directory(tmp_path, repo, monkeypatch
 
     assert exc.value.code == 0
     out = capsys.readouterr().out
-    for name in ("doctor", "install", "fetch", "profile", "start", "stop", "status", "logs", "smoke", "con", "suggest", "update", "uninstall"):
+    for name in ("doctor", "install", "fetch", "profile", "start", "stop", "status", "logs", "smoke", "con", "suggest", "update", "uninstall", "bench"):
         assert name in out
 
 

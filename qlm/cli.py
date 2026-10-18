@@ -43,6 +43,8 @@ def build_parser():
     suggest_mode = suggest.add_mutually_exclusive_group(required=True)
     suggest_mode.add_argument("--enable", dest="enable", action="store_true", default=None, help="turn suggestions on")
     suggest_mode.add_argument("--disable", dest="enable", action="store_false", help="turn suggestions off")
+    bench = sub.add_parser("bench", help="measure speed, MTP acceptance, cache reuse and peak VRAM of the running server")
+    bench.add_argument("--quick", action="store_true", help="a short run: one prompt size, one generation, no restarts")
     update = sub.add_parser("update", help="build a newer llama.cpp tag, switch to it, and switch back if smoke fails")
     update.add_argument("--tag", required=True, type=_pattern(r"b[0-9]+", "a tag like b11700"), help="llama.cpp tag")
     update.add_argument("--commit", required=True, type=_pattern(r"[0-9a-f]{40}", "a 40-character lower-case commit"),
@@ -134,6 +136,10 @@ def _dispatch(args, ctx):
         from qlm import con, service
 
         return service.run(ctx, con.suggest, enable=args.enable)
+    if args.command == "bench":
+        from qlm import bench
+
+        return bench.run(ctx, quick=args.quick)
     if args.command == "update":
         from qlm import update
 
