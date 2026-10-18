@@ -349,3 +349,19 @@ def test_signal_handlers_are_put_back_after_an_update(home, repo):
 def test_sigterm_is_turned_into_an_interrupt():
     with pytest.raises(KeyboardInterrupt):
         interrupts.raise_interrupt(signal.SIGTERM, None)
+
+
+def test_ctrl_c_and_sigterm_are_ignored_during_the_rollback(home, repo):
+    p = installed(home, repo)
+    handlers = []
+    run = update_runner(home, repo, p)
+
+    def restart(argv):
+        handlers.append((signal.getsignal(signal.SIGINT), signal.getsignal(signal.SIGTERM)))
+        return ok()
+
+    run.script[RESTART] = restart
+    code, ctx = run_update(home, repo, run, server=broken_tool_call())
+    assert code == 1
+    assert handlers[0] != (signal.SIG_IGN, signal.SIG_IGN)
+    assert handlers[1] == (signal.SIG_IGN, signal.SIG_IGN)
