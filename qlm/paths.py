@@ -44,6 +44,10 @@ class Paths:
         return self.config_dir / "active.env"
 
     @property
+    def bench_backup(self):
+        return self.config_dir / "active.env.bench-backup"
+
+    @property
     def api_key(self):
         return self.config_dir / "api-key"
 

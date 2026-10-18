@@ -219,9 +219,10 @@ def check_auth(client):
     return "a request without the key gets 401"
 
 
-def run(ctx):
+def run(ctx, failed_names=None):
+    """Run the eight checks. If `failed_names` is a list, the names of failed checks are added to it."""
     try:
-        return _run(ctx)
+        return _run(ctx, failed_names)
     except service.Stop as stop:
         return ctx.fail(stop.what, stop.todo)
     except BrokenPipeError:
@@ -230,7 +231,7 @@ def run(ctx):
         return ctx.fail(f"file error: {e}", "Fix the cause and try again")
 
 
-def _run(ctx):
+def _run(ctx, failed_names):
     p = ctx.paths
     if not p.api_key.exists() or not p.api_key.read_text().strip():
         raise service.Stop(f"the API key file {p.api_key} is missing or empty", "Run qlm install")
@@ -293,6 +294,8 @@ def _run(ctx):
     if not failed:
         return 0
     names = ", ".join(f"{c.number} {NAMES[c.number]}" for c in failed)
+    if failed_names is not None:
+        failed_names.append(names)
     if results[1].status == "FAIL":
         todo = "Start the server with qlm start, then run qlm smoke again"
     elif client.unauthorized:

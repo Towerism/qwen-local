@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import re
 import sys
 
 from qlm import pins
@@ -42,10 +43,23 @@ def build_parser():
     suggest_mode = suggest.add_mutually_exclusive_group(required=True)
     suggest_mode.add_argument("--enable", dest="enable", action="store_true", default=None, help="turn suggestions on")
     suggest_mode.add_argument("--disable", dest="enable", action="store_false", help="turn suggestions off")
+    update = sub.add_parser("update", help="build a newer llama.cpp tag, switch to it, and switch back if smoke fails")
+    update.add_argument("--tag", required=True, type=_pattern(r"b[0-9]+", "a tag like b11700"), help="llama.cpp tag")
+    update.add_argument("--commit", required=True, type=_pattern(r"[0-9a-f]{40}", "a 40-character lower-case commit"),
+                        help="the full commit the tag must point at")
     logs = sub.add_parser("logs", help="show the server's journal")
     logs.add_argument("-n", dest="lines", type=_positive_int, default=50, help="number of lines (default 50)")
     logs.add_argument("-f", dest="follow", action="store_true", help="keep following new lines")
     return parser
+
+
+def _pattern(regex, what):
+    def check(text):
+        if not re.fullmatch(regex, text):
+            raise argparse.ArgumentTypeError(f"expected {what}, got {text!r}")
+        return text
+
+    return check
 
 
 def _positive_int(text):
@@ -117,6 +131,10 @@ def _dispatch(args, ctx):
         from qlm import con, service
 
         return service.run(ctx, con.suggest, enable=args.enable)
+    if args.command == "update":
+        from qlm import update
+
+        return update.run(ctx, tag=args.tag, commit=args.commit)
     if args.command == "smoke":
         from qlm import smoke
 
