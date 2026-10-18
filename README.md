@@ -2,7 +2,7 @@
 
 `qlm` sets up and runs Qwen3.8-27B (Q4_K_M) on one RTX 4090 with llama.cpp's `llama-server`, as the local model behind the [Con](https://github.com/nowledge-co/con-terminal) AI terminal.
 
-**Status:** setting up, running the server, checking it and connecting Con all work. Benchmarks, updates and uninstall come next ([#5](https://github.com/Towerism/qwen-local/issues/5)).
+**Status:** every command in the design works: set up, run and check the server, connect Con, benchmark, update llama.cpp and uninstall.
 
 Read these first:
 
@@ -49,6 +49,21 @@ Tabs that Con restores from your last session keep the provider they had before,
 | `qlm logs [-n N] [-f]` | The server's journal |
 | `qlm profile use <agent\|long\|vision>` | Switch profile; restarts the server if it is running. `long` has 96k context without MTP; `vision` needs `qlm fetch --vision` first |
 | `qlm suggest --enable` / `--disable` | Turn Con's shell suggestions on, from a small CPU-only Ollama model (about 1 GB download), or off |
+
+## Measuring, updating and removing
+
+```bash
+qlm bench --quick                                   # a few seconds: one prompt size, one generation, no restarts
+qlm bench                                           # about 10 minutes: restarts the server twice to compare MTP on and off
+qlm update --tag b11700 --commit <40-character sha> # build a newer llama.cpp; goes back by itself if smoke fails
+qlm uninstall                                       # lists what it removes and asks; --models also removes the 17.8 GB of models
+```
+
+`qlm bench` needs the server running, and Con should stay idle until it finishes, because the bench replaces Con's cached prompt. Each run is saved under `~/.local/state/qlm/bench/` and compared with the previous run of the same kind and profile.
+
+`qlm update` trusts the commit you give it, so copy it from the tag's page on [github.com/ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp/tags). The pinned tag in [ADR 0001](docs/adr/0001-runtime-llama-cpp-server.md) and `qlm/pins.py` doesn't move by itself; update both by hand if the new tag should become the pinned one.
+
+`qlm uninstall` keeps `~/.local/state/qlm/`, where the `con.conf` backups live. If Con still uses the local server, run `qlm con --revert` first, or afterwards from the clone with `bin/qlm con --revert`.
 
 ## Tests
 

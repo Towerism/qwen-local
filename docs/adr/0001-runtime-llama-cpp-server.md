@@ -28,6 +28,7 @@ llama-server also gives explicit control over every setting this design depends 
 ## Consequences
 
 - The pinned source is tag `b11669`, commit `620d2225cc436ab0b001e3200e590e3b286ef9ab`. Tags can be moved, so `qlm install` checks the commit after checkout. `qlm update` takes the new commit as an argument and checks it the same way.
+- `qlm update --tag <bN> --commit <sha>` builds another tag beside the pinned one and points `current` at it if smoke passes. The pin in this ADR and `qlm/pins.py` moves only with an edit to both, and a test keeps them equal (added 2026-10-17, issue #5).
 - We own a build step. `qlm install` builds a pinned tag and `qlm update` rebuilds into a new directory, so a bad build never replaces a working one (see the architecture doc).
 - The Ollama service can keep running for other uses, but `qlm start` refuses to start while Ollama has a model loaded, because both would compete for the same VRAM.
 - The host has CUDA 13.4 and GCC (the GNU compiler) 16. If `nvcc` rejects GCC 16, the build falls back to `g++-15`, which is installed.

@@ -111,6 +111,16 @@ class Runner:
         except OSError:
             return 126
 
+    def stream(self, argv):
+        """Start a command whose stdout is read line by line while it runs (nvidia-smi --loop-ms)."""
+        try:
+            proc = subprocess.Popen(
+                [str(a) for a in argv], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, errors="replace"
+            )
+        except OSError:
+            return _NoStream()
+        return _Stream(proc)
+
     def which(self, name, extra_dirs=()):
         found = shutil.which(name)
         if found:
@@ -120,6 +130,38 @@ class Runner:
             if candidate.is_file() and os.access(candidate, os.X_OK):
                 return str(candidate)
         return None
+
+
+class _Stream:
+    def __init__(self, proc):
+        self.proc = proc
+
+    def lines(self):
+        try:
+            for line in self.proc.stdout:
+                yield line.rstrip("\r\n")
+        finally:
+            self.proc.stdout.close()
+
+    def stop(self):
+        """End the process and wait for it. The reader of lines() then sees the end of output."""
+        if self.proc.poll() is None:
+            self.proc.terminate()
+            try:
+                self.proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                self.proc.kill()
+                self.proc.wait()
+
+
+class _NoStream:
+    """The stream of a program that couldn't be started: no lines."""
+
+    def lines(self):
+        return iter(())
+
+    def stop(self):
+        pass
 
 
 class Http:
@@ -215,6 +257,17 @@ class Env:
 
     def is_tty(self, stream):
         return sys.stderr.isatty()
+
+    def stdin_is_tty(self):
+        try:
+            return sys.stdin.isatty()
+        except (AttributeError, ValueError):  # no stdin, or it was closed
+            return False
+
+    def ask(self, prompt):
+        """Print `prompt` and return one line from stdin without its ending; "" at end of input."""
+        print(prompt, end=" ", flush=True)
+        return sys.stdin.readline().rstrip("\r\n")
 
     def random_token(self, nbytes):
         return secrets.token_urlsafe(nbytes)

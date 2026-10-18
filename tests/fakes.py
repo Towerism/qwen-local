@@ -17,7 +17,8 @@ class FakeRunner:
     A script value is a RunResult, a callable taking argv and returning one, or a list of
     either, used one per call with the last repeated. The longest matching prefix wins.
     Unscripted commands fail loudly. `passthrough` answers from the same script with the
-    result's exit code, or raises the value if it is an exception.
+    result's exit code, or raises the value if it is an exception. `stream` answers with a
+    FakeStream over the result's stdout lines; every stream handed out is kept in `streams`.
     """
 
     def __init__(self, script=None, which=None):
@@ -25,6 +26,7 @@ class FakeRunner:
         self.which_map = dict(which or {})
         self.calls = []
         self.passthrough_calls = []
+        self.streams = []
 
     def _answer(self, argv):
         best = None
@@ -51,11 +53,31 @@ class FakeRunner:
         self.calls.append({"argv": argv, "cwd": None, "env": None, "timeout": None})
         return self._answer(argv).code
 
+    def stream(self, argv):
+        argv = [str(a) for a in argv]
+        self.calls.append({"argv": argv, "cwd": None, "env": None, "timeout": None})
+        handle = FakeStream(argv, self._answer(argv).stdout.splitlines())
+        self.streams.append(handle)
+        return handle
+
     def which(self, name, extra_dirs=()):
         return self.which_map.get(name)
 
     def ran(self, *prefix):
         return [c["argv"] for c in self.calls if tuple(c["argv"][: len(prefix)]) == prefix]
+
+
+class FakeStream:
+    """A finished process's output: lines() yields the fixed lines, then ends."""
+
+    def __init__(self, argv, lines):
+        self.argv, self._lines, self.stopped = argv, list(lines), False
+
+    def lines(self):
+        return iter(self._lines)
+
+    def stop(self):
+        self.stopped = True
 
 
 def ok(stdout="", stderr=""):
@@ -185,6 +207,16 @@ class FakeEnv:
     token: str = "k" * 43
     cpus: int = 32
     xdg: object = None
+    stdin_tty: bool = False
+    answers: list = field(default_factory=list)
+    prompts: list = field(default_factory=list)
+
+    def stdin_is_tty(self):
+        return self.stdin_tty
+
+    def ask(self, prompt):
+        self.prompts.append(prompt)
+        return self.answers.pop(0) if self.answers else ""
 
     def xdg_config_home(self):
         return self.xdg

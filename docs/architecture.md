@@ -16,15 +16,17 @@
 | Con link | `openaicompatible` provider at `http://127.0.0.1:9931/v1`; suggestion model off | [ADR 0003](adr/0003-con-integration.md) |
 | Tooling | One Python stdlib CLI, pytest, systemd user service | [ADR 0004](adr/0004-python-stdlib-cli-and-systemd-user-unit.md) |
 
-Expected results are estimates until `qlm bench` measures them:
+The first full `qlm bench` on this machine (2026-10-18, `agent` profile, llama.cpp `b11669`) measured these, next to the estimates the design started from. Speeds are medians of 3 runs.
 
-| Measure | Estimate | Source |
-|---|---|---|
-| Server VRAM | ~20.3 GiB (22.8 of 23.99 GiB with the desktop) | ADR 0002 arithmetic |
-| Generation, MTP on | 70–130 tok/s (higher when editing code, lower on new reasoning) | 4090 test of Qwen3.6-27B Q4_K_M: 47 → 133 tok/s |
-| Generation, MTP off | 45–48 tok/s | Same test |
-| Prompt processing | 1,500–2,500 tok/s | Estimate for a dense 27B model on a 4090 |
-| First Con turn | 6–9 s before output starts | ~13k-token fixed prompt at the rate above |
+| Measure | Estimate | Measured | Source of the estimate |
+|---|---|---|---|
+| Server VRAM, peak | ~20.3 GiB (22.8 of 23.99 GiB with the desktop) | 19.4 GiB; 17.5 GiB with MTP off | ADR 0002 arithmetic |
+| Generation, MTP on | 70–130 tok/s (higher when editing code, lower on new reasoning) | 114.4 tok/s editing code, 81.4 tok/s writing prose | 4090 test of Qwen3.6-27B Q4_K_M: 47 → 133 tok/s |
+| MTP draft acceptance | | 92.6% editing code (2.8 tokens per step), 47.1% writing prose (1.4) | |
+| Generation, MTP off | 45–48 tok/s | 44.1–44.2 tok/s | Same test |
+| Prompt processing | 1,500–2,500 tok/s | 2,171–2,474 tok/s from 2k to 48k tokens; 2,524–2,899 tok/s with MTP off | Estimate for a dense 27B model on a 4090 |
+| First Con turn | 6–9 s before output starts | About 5.5 s, worked out from the measured rate | ~13k-token fixed prompt at the rate above |
+| Later Con turns | Only the new tokens are re-read | 1,053–1,054 tokens re-read per turn after a 13k prefix, with MTP on and off | ADR 0001, context checkpoints |
 
 ## How the parts connect
 
@@ -52,9 +54,10 @@ flowchart LR
 | `~/.local/opt/llama.cpp/<tag>/` | Built `llama-server` and `llama-bench`, one directory per tag | `qlm install`, `qlm update` |
 | `~/.local/opt/llama.cpp/current` | Symlink to the active tag | Switched only after a check passes |
 | `~/.local/share/qlm/models/` | The two GGUF files and `SHA256SUMS` | `qlm fetch` |
-| `~/.config/qlm/active.env` | The active profile as `LLAMA_ARG_*` variables. `qlm install` writes the `agent` profile here, so it always exists. | `qlm install`, `qlm profile use` |
+| `~/.config/qlm/active.env` | The active profile as `LLAMA_ARG_*` variables. `qlm install` writes the `agent` profile here, so it always exists. | `qlm install`, `qlm profile use`, `qlm bench` (temporarily) |
+| `~/.config/qlm/active.env.bench-backup` | The profile as it was before `qlm bench` switched MTP off. It exists only during a full bench; if it is left behind, `qlm bench` and `qlm update` refuse and give the command to put it back. | `qlm bench` |
 | `~/.config/systemd/user/qlm-server.service` | Service unit | `qlm install` |
-| `~/.local/state/qlm/` | Bench results (JSON), `smoke/` holding one log per `qlm smoke` run, and `backups/` holding timestamped copies of `con.conf`. Both folders are mode 0700 and their files 0600. | `qlm bench`, `qlm smoke`, `qlm con`, `qlm suggest` |
+| `~/.local/state/qlm/` | `bench/` holding one JSON file per `qlm bench` run, `smoke/` holding one log per `qlm smoke` run, `logs/` holding the `install-<stamp>.log` and `update-<stamp>.log` build logs, and `backups/` holding timestamped copies of `con.conf`. The folders are mode 0700 and their files 0600. | `qlm bench`, `qlm smoke`, `qlm install`, `qlm update`, `qlm con`, `qlm suggest` |
 
 ## Commands
 
@@ -63,17 +66,17 @@ Each command does one job and exits non-zero on failure with a message that name
 | Command | What it does | Done when |
 |---|---|---|
 | `qlm doctor` | Read-only preflight: driver and `nvidia-smi`, `nvcc` and host compiler, disk space, port 9931 free, models loaded in Ollama, VRAM held by other processes, `~/.local/bin` on `PATH`, Con config keys | Prints a pass/fail line per check |
-| `qlm install [--tag b11669] [--rebuild]` | Resolve the tag to its commit and stop unless it matches ADR 0001, then check out that commit, build with `-DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=89 -DBUILD_SHARED_LIBS=OFF`, and retry the configure step with `-DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-15` if `nvcc` rejects the host compiler. Copy the new binaries in under staged names; they replace the old ones only after the `--help` check passes. Then switch `current`, install the unit and symlink, write the `agent` profile to `active.env`, and create the API key file (ADR 0003). An installed tag skips the build unless `--rebuild` is given. `--tag` accepts only the pinned tag until `qlm update` exists. | `llama-server --help` lists every variable the profiles use as `(env: NAME)`, and `draft-mtp` among the `--spec-type` values |
+| `qlm install [--tag b11669] [--rebuild]` | Resolve the tag to its commit and stop unless it matches ADR 0001, then check out that commit, build with `-DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=89 -DBUILD_SHARED_LIBS=OFF`, and retry the configure step with `-DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-15` if `nvcc` rejects the host compiler. Copy the new binaries in under staged names; they replace the old ones only after the `--help` check passes. Then point `current` at the pinned tag, but only when `current` is missing or its build is gone, so a later `qlm install` never undoes a `qlm update`. Install the unit and symlink, write the `agent` profile to `active.env`, and create the API key file (ADR 0003). An installed tag skips the build unless `--rebuild` is given. `--tag` accepts only the pinned tag; for any other, it says to use `qlm update`. | `llama-server --help` lists every variable the profiles use as `(env: NAME)`, and `draft-mtp` among the `--spec-type` values |
 | `qlm fetch [--vision]` | Download the model and MTP files with resume from the pinned Hugging Face revision (`/resolve/<revision>/`), then check SHA-256 against the hashes recorded in ADR 0002, not hashes fetched at download time. `--vision` adds `mmproj-BF16.gguf`. After a run in which every file verified, write `SHA256SUMS`. | All hashes match the recorded ones |
 | `qlm profile use <agent\|long\|vision>` | Render `active.env` from `profiles/<name>.env`, after checking that the model files it names exist. If the service is running, first run the Ollama and VRAM checks from `qlm start`, counting the running server's own VRAM as free, then restart it and wait and report as `qlm start` does | `active.env` matches the profile |
 | `qlm start` | Check free VRAM (total minus used, from `nvidia-smi --query-gpu=memory.total,memory.used`) against the profile's `vram_gib` plus 0.5 GiB. Refuse if `ollama ps` shows a model using the GPU, and print the `ollama stop <name>` command. A CPU-only model such as `con-suggest` is allowed. Then clear any earlier start limit with `systemctl --user reset-failed`, start the service, wait for `/health` to return 200 (up to 180 s), and stop the unit if the wait runs out or the server exits, so it doesn't keep retrying | Reports the server's VRAM and load time |
 | `qlm stop`, `qlm status`, `qlm logs [-n N] [-f]` | Wrap `systemctl --user` and `journalctl --user`. `status` adds VRAM, the profile, uptime, and the largest request so far (`llamacpp:n_tokens_max` from `/metrics`) against the context size. The pinned llama-server has no metric for the context in use right now, and `/slots`, which has it, stays off. | |
 | `qlm smoke` | Eight API checks, listed below | All pass, or each failure is named |
-| `qlm bench` | Measure prompt and generation speed, MTP acceptance, cache reuse and peak VRAM; save JSON and compare with the last run | Results saved under `~/.local/state/qlm/bench/` |
+| `qlm bench [--quick]` | Measure the running server: prompt and generation speed, MTP acceptance, cache reuse and peak VRAM, with MTP on and off. It needs a ready server and never starts one. `--quick` takes one short measurement of each kind without restarting. Slow numbers never fail it; only a measurement that can't be taken does. | Results saved as `bench-<stamp>.json` under `~/.local/state/qlm/bench/`, and compared with the newest earlier run of the same kind and profile |
 | `qlm con --print\|--apply\|--revert` | Show, write or undo the Con keys from ADR 0003. `--apply` refuses while Con is running (`pgrep -x con`; Con's binary is named `con`) and while the file has dashed `openai-compatible` keys. It backs up first with mode 0600, writes the new file atomically with the original's mode, sets the API key, and removes `con.agent.temperature` if set so the server's sampling applies. It leaves the suggestion model on when `qlm suggest --enable` pointed it at Ollama's `con-suggest`. `--revert` restores the newest backup. | `--apply` re-reads the file and finds exactly the expected values, or puts the old file back. Checking that Con's agent answers is a manual step. |
 | `qlm suggest --enable\|--disable` | `--enable` creates the CPU-only `con-suggest` Ollama model and sets `con.agent.suggestion_model.enabled = true`, `.provider = "ollama"` and `.model = "con-suggest"`. `--disable` sets `enabled = false`. Same Con-running and backup rules as `qlm con`. | |
-| `qlm update --tag <bN> --commit <sha>` | In this order: build the new tag beside the old one, check its commit and its `--help`, check free VRAM as `qlm start` does, switch `current` to it, restart, run `qlm smoke`. If smoke fails, switch `current` back and restart. If the service was stopped beforehand, it is stopped again at the end. Nothing is switched if the build, the checks or the VRAM preflight fail. | Smoke passes on the new tag, or the old tag is back in `current` |
-| `qlm uninstall [--models]` | Stop and remove the unit, builds and symlinks; keep model files unless `--models` | |
+| `qlm update --tag <bN> --commit <sha>` | In this order: build the new tag beside the old one, check its commit and its `--help`, check free VRAM as `qlm start` does, switch `current` to it, restart, run `qlm smoke`. If smoke fails, switch `current` back and restart. If the service was stopped beforehand, it is stopped again at the end. Nothing is switched if the build, the checks or `qlm start`'s preflight fail. Ctrl-C or SIGTERM after the switch rolls back too. `qlm install` won't undo an update. The pin in ADR 0001 and `qlm/pins.py` moves only by hand. `--commit` is what makes the build trustworthy, so copy it from the tag's page on GitHub. | Smoke passes on the new tag, or the old tag is back in `current` |
+| `qlm uninstall [--models] [--yes]` | List what it removes and keeps, then ask for `yes` (`--yes` skips the question; without a terminal it is required). Stop the server, then remove the unit, `current` and the `b<digits>` builds, `~/.cache/qlm/`, the `qlm` link if it points at this repo, and `~/.config/qlm/`. `--models` also removes the model files. It keeps `~/.local/state/qlm/`, which holds the `con.conf` backups, and never edits `con.conf`; it says how to revert Con if Con still points here. Links are removed as links. | Everything listed is gone, or the failure lists what was removed and what remains |
 
 ### The `agent` profile
 
@@ -160,10 +163,15 @@ The exact tool schemas, prompts and timeouts are in the spec on [issue #4](https
 
 ### What `qlm bench` measures
 
-- Prompt processing at 2k, 16k and 48k tokens, and generation of 512 tokens, with MTP on and off. To toggle MTP, bench copies `active.env`, writes a variant without the `SPEC_*` lines, restarts, measures, then restores the copy and restarts again, including when the run fails or is interrupted.
-- MTP draft acceptance rate from `timings` and `/metrics`.
-- Cache reuse in a Con-shaped session: a 13k-token fixed prefix, then three turns that each append a tool result. It reports how many prompt tokens each turn re-processed. This is the test for the checkpoint behaviour ADR 0001 depends on.
-- Peak VRAM, sampled from `nvidia-smi` every 200 ms during the run.
+Each speed is the median of 3 runs. All prompt text is synthetic filler, sized with the server's `/tokenize`, so no real prompt goes into the results. The exact requests are in the spec on [issue #5](https://github.com/Towerism/qwen-local/issues/5).
+
+- Prompt processing at 2k, 16k and 48k tokens with prompt caching off. A size that doesn't fit the profile's context is skipped.
+- Generation of 512 tokens for a code-editing prompt and a prose prompt, with a fixed seed and the profile's own sampling, as Con gets it.
+- MTP draft acceptance: the share of drafted tokens accepted, from `timings`, and accepted tokens per verification step, from `/metrics`.
+- Cache reuse in a Con-shaped session: a 13k-token fixed prefix, then three turns that each resend the history without the model's reasoning, as Con does, and append a tool result. A turn counts as reused when it re-processed at most 1,024 tokens more than it added. This is the test for the checkpoint behaviour ADR 0001 depends on.
+- Peak VRAM of the server process, sampled from `nvidia-smi` five times a second, next to the profile's `vram_gib`.
+
+With MTP on, a full run measures, then checks VRAM, saves `active.env` to `active.env.bench-backup`, writes a variant without the `SPEC_*` lines, restarts and measures again. It always writes the saved copy back and restarts, whether the run succeeds, fails, or gets Ctrl-C or SIGTERM. A second Ctrl-C during that restore is ignored.
 
 ## What fails, and what the user sees
 
@@ -180,7 +188,7 @@ The exact tool schemas, prompts and timeouts are in the spec on [issue #4](https
 ## How the code is tested
 
 - **Unit tests (pytest, default run).** `subprocess` calls, HTTP and the clock are passed in as parameters, so tests use fakes. Fixtures hold outputs in the shape captured from this machine: `nvidia-smi` queries, `ollama ps`, a `llama-server --help` from the pinned tag, and recorded `/v1/chat/completions` responses. The repo is public, so fixtures are scrubbed before commit: no usernames, home paths, process lists or real prompt text. A test fails if any fixture contains `/home/`. Test cases cover profile rendering, the VRAM preflight maths, the checksum and resume logic, Con config editing (unknown keys, existing values, Con running), and update rollback.
-- **Machine tests (`pytest -m machine`, opt-in).** These run the real tools on this machine: `qlm doctor`, verifying the model files, and starting the real server to run `qlm status` and `qlm smoke` before stopping it again. A short `qlm bench` joins them in issue #5.
+- **Machine tests (`pytest -m machine`, opt-in).** These run the real tools on this machine: `qlm doctor`, verifying the model files, and starting the real server to run `qlm status` and `qlm smoke` before stopping it again. `qlm bench --quick` runs the same way, and leaves a result file behind.
 - The test plan is written per feature during the spec step (`senior-qa`), before the tests.
 
 ## Not in scope

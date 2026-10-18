@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import re
 import sys
 
 from qlm import pins
@@ -20,7 +21,7 @@ def build_parser():
     sub.required = True
     sub.add_parser("doctor", help="check this machine before installing (read-only)")
     install = sub.add_parser("install", help="build llama.cpp and install the service, profile and API key")
-    install.add_argument("--tag", default=pins.LLAMA_TAG, help=f"llama.cpp tag (only {pins.LLAMA_TAG} for now)")
+    install.add_argument("--tag", default=pins.LLAMA_TAG, help=f"llama.cpp tag; only the pinned {pins.LLAMA_TAG} (use qlm update for others)")
     install.add_argument("--rebuild", action="store_true", help="build again even if this tag is installed")
     fetch = sub.add_parser("fetch", help="download and verify the pinned model files")
     fetch.add_argument("--vision", action="store_true", help="also fetch the vision projector")
@@ -42,10 +43,28 @@ def build_parser():
     suggest_mode = suggest.add_mutually_exclusive_group(required=True)
     suggest_mode.add_argument("--enable", dest="enable", action="store_true", default=None, help="turn suggestions on")
     suggest_mode.add_argument("--disable", dest="enable", action="store_false", help="turn suggestions off")
+    bench = sub.add_parser("bench", help="measure speed, MTP acceptance, cache reuse and peak VRAM of the running server")
+    bench.add_argument("--quick", action="store_true", help="a short run: one prompt size, one generation, no restarts")
+    update = sub.add_parser("update", help="build a newer llama.cpp tag, switch to it, and switch back if smoke fails")
+    update.add_argument("--tag", required=True, type=_pattern(r"b[0-9]+", "a tag like b11700"), help="llama.cpp tag")
+    update.add_argument("--commit", required=True, type=_pattern(r"[0-9a-f]{40}", "a 40-character lower-case commit"),
+                        help="the full commit the tag must point at")
+    uninstall = sub.add_parser("uninstall", help="remove the service, builds, link and config; keeps logs and models")
+    uninstall.add_argument("--models", action="store_true", help="also remove the model files")
+    uninstall.add_argument("--yes", action="store_true", help="don't ask before removing")
     logs = sub.add_parser("logs", help="show the server's journal")
     logs.add_argument("-n", dest="lines", type=_positive_int, default=50, help="number of lines (default 50)")
     logs.add_argument("-f", dest="follow", action="store_true", help="keep following new lines")
     return parser
+
+
+def _pattern(regex, what):
+    def check(text):
+        if not re.fullmatch(regex, text):
+            raise argparse.ArgumentTypeError(f"expected {what}, got {text!r}")
+        return text
+
+    return check
 
 
 def _positive_int(text):
@@ -88,7 +107,8 @@ def _dispatch(args, ctx):
     if args.command == "install":
         if args.tag != pins.LLAMA_TAG:
             print(
-                f"qlm: tag {args.tag} is not supported. Only {pins.LLAMA_TAG} is pinned; other tags arrive with qlm update.",
+                f"qlm: qlm install builds only the pinned tag {pins.LLAMA_TAG}. "
+                f"To move to {args.tag}, run qlm update --tag {args.tag} --commit <its commit>.",
                 file=ctx.err,
             )
             return 2
@@ -116,6 +136,18 @@ def _dispatch(args, ctx):
         from qlm import con, service
 
         return service.run(ctx, con.suggest, enable=args.enable)
+    if args.command == "bench":
+        from qlm import bench
+
+        return bench.run(ctx, quick=args.quick)
+    if args.command == "update":
+        from qlm import update
+
+        return update.run(ctx, tag=args.tag, commit=args.commit)
+    if args.command == "uninstall":
+        from qlm import uninstall
+
+        return uninstall.run(ctx, models=args.models, yes=args.yes)
     if args.command == "smoke":
         from qlm import smoke
 

@@ -24,6 +24,10 @@ EXPECTED_FILES = [
     "qlm/con.py",
     "qlm/service.py",
     "qlm/smoke.py",
+    "qlm/update.py",
+    "qlm/interrupts.py",
+    "qlm/uninstall.py",
+    "qlm/bench.py",
     "profiles/agent.env",
     "profiles/long.env",
     "profiles/vision.env",
@@ -47,7 +51,7 @@ def test_help_through_symlink_from_another_directory(tmp_path, repo, monkeypatch
 
     assert exc.value.code == 0
     out = capsys.readouterr().out
-    for name in ("doctor", "install", "fetch", "profile", "start", "stop", "status", "logs", "smoke", "con", "suggest"):
+    for name in ("doctor", "install", "fetch", "profile", "start", "stop", "status", "logs", "smoke", "con", "suggest", "update", "uninstall", "bench"):
         assert name in out
 
 
@@ -85,7 +89,7 @@ def test_install_rejects_other_tags_before_running_anything(home, repo):
     ctx = make_ctx(home, repo)
     assert cli.main(["install", "--tag", "b11670"], ctx) == 2
     assert ctx.runner.calls == []
-    assert "qlm update" in ctx.err.getvalue()
+    assert "qlm update --tag b11670 --commit" in ctx.err.getvalue()
 
 
 def test_repo_has_the_specified_layout(repo):
@@ -97,7 +101,7 @@ def test_every_path_lives_under_the_given_home(home, repo):
     paths = Paths(home=home, repo=repo)
     for name in (
         "llama_src", "llama_opt", "llama_current", "models", "config_dir", "active_env",
-        "api_key", "unit_file", "state_dir", "logs", "backups", "bench", "local_bin", "qlm_link", "con_conf",
+        "api_key", "unit_file", "state_dir", "logs", "backups", "bench", "bench_backup", "local_bin", "qlm_link", "con_conf",
     ):
         value = getattr(paths, name)
         assert pathlib.Path(value).is_relative_to(home), name

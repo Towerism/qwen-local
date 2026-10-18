@@ -68,5 +68,5 @@ Context checkpoints and the prompt cache (`--cache-ram`) live in system RAM, not
 ## Consequences
 
 - The estimate leaves about 1.2 GiB spare. A browser with many tabs can use that up. `qlm start` checks free VRAM before launching and names the processes holding it.
-- `qlm bench` measures the real peak and writes it to the run log, replacing the 1.3 GiB compute estimate with a measured value.
+- `qlm bench` measures the real peak. The first full run (2026-10-18) measured 19.4 GiB with MTP on and 17.5 GiB with MTP off, so the server uses about 0.9 GiB less than this arithmetic. Compute buffers and the CUDA context come to about 0.4 GiB, not 1.3, which leaves about 2.1 GiB spare beside the desktop instead of 1.2.
 - The model's name, Qwen3.8-27B Q4_K_M, matches what the user picked. The file differs from Ollama's `qwen3.8:27b-q4_K_M` tag; this ADR records why.
