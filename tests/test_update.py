@@ -235,6 +235,7 @@ def test_a_running_server_moves_to_the_new_tag_and_keeps_running(home, repo):
     text = out(ctx)
     assert f"from {OLD} to {NEW}" in text
     assert f"still pin {pins.LLAMA_TAG}" in text and "qlm/pins.py" in text and "ADR 0001" in text
+    assert "k" * 43 not in text
 
 
 def test_a_stopped_server_is_started_for_smoke_and_stopped_again(home, repo):
