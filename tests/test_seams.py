@@ -1,8 +1,10 @@
 """The seams added for running the server: local HTTP requests, terminal passthrough and XDG_CONFIG_HOME."""
 
 import http.server
+import io
 import json
 import subprocess
+import sys
 import threading
 import urllib.error
 
@@ -151,3 +153,76 @@ def test_xdg_config_home_comes_from_the_environment(monkeypatch):
     assert Env().xdg_config_home() == "/x/cfg"
     monkeypatch.delenv("XDG_CONFIG_HOME")
     assert Env().xdg_config_home() is None
+
+
+class _FakePopen:
+    """Stands in for subprocess.Popen: stdout yields fixed lines, and terminate ends the process."""
+
+    started = []
+
+    def __init__(self, argv, **kwargs):
+        self.argv, self.kwargs = argv, kwargs
+        self.stdout = io.StringIO("2096, 73\n9105, 19860\n")
+        self.returncode = None
+        self.terminated = False
+        _FakePopen.started.append(self)
+
+    def poll(self):
+        return self.returncode
+
+    def terminate(self):
+        self.terminated = True
+        self.returncode = -15
+
+    def kill(self):
+        self.returncode = -9
+
+    def wait(self, timeout=None):
+        return self.returncode
+
+
+def test_stream_yields_lines_without_endings_and_stop_ends_the_process(monkeypatch):
+    _FakePopen.started.clear()
+    monkeypatch.setattr(subprocess, "Popen", _FakePopen)
+    handle = Runner().stream(["nvidia-smi", "--loop-ms=200"])
+    assert list(handle.lines()) == ["2096, 73", "9105, 19860"]
+    handle.stop()
+    proc = _FakePopen.started[0]
+    assert proc.terminated
+    assert proc.kwargs["stdout"] == subprocess.PIPE and "shell" not in proc.kwargs
+
+
+def test_stream_of_a_missing_program_yields_nothing(monkeypatch):
+    def missing(argv, **kwargs):
+        raise FileNotFoundError(argv[0])
+
+    monkeypatch.setattr(subprocess, "Popen", missing)
+    handle = Runner().stream(["nvidia-smi"])
+    assert list(handle.lines()) == []
+    handle.stop()
+
+
+def test_ask_prints_the_prompt_and_returns_one_line_without_its_ending(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "stdin", io.StringIO("yes\r\nignored\n"))
+    assert Env().ask("Type yes to remove these:") == "yes"
+    assert "Type yes to remove these:" in capsys.readouterr().out
+
+
+def test_ask_returns_empty_at_end_of_input(monkeypatch):
+    monkeypatch.setattr(sys, "stdin", io.StringIO(""))
+    assert Env().ask("?") == ""
+
+
+def test_stdin_is_tty_follows_standard_input(monkeypatch):
+    class Tty(io.StringIO):
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr(sys, "stdin", Tty())
+    assert Env().stdin_is_tty() is True
+    monkeypatch.setattr(sys, "stdin", io.StringIO())
+    assert Env().stdin_is_tty() is False
+    closed = io.StringIO()
+    closed.close()
+    monkeypatch.setattr(sys, "stdin", closed)
+    assert Env().stdin_is_tty() is False
