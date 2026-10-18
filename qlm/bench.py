@@ -15,7 +15,7 @@ import re
 import statistics
 import threading
 
-from qlm import files, interrupts, service, smoke, update
+from qlm import files, interrupts, service, smoke
 from qlm.system import SERVER, ServerUnreachable
 
 WARNING = ("Note: qlm bench replaces Con's cached prompt and, in a full run with MTP on, restarts the server "
@@ -419,7 +419,7 @@ def run(ctx, quick=False):
 
 def _check_ready(ctx):
     p = ctx.paths
-    update.leftover_bench_backup(ctx)
+    service.leftover_bench_backup(ctx)
     if not p.api_key.exists() or not p.api_key.read_text().strip():
         raise service.Stop(f"the API key file {p.api_key} is missing or empty", "Run qlm install")
     profile = service.active_profile(ctx)

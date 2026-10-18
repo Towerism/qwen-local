@@ -52,12 +52,12 @@ class UnitState:
         return self.active in ("failed", "inactive") or self.sub == "auto-restart"
 
 
-def _systemctl(ctx, *args):
+def systemctl(ctx, *args):
     return ctx.runner.run(["systemctl", "--user", *args], timeout=TIMEOUT_S)
 
 
 def unit_state(ctx):
-    r = _systemctl(ctx, "show", "-p", "ActiveState,SubState,MainPID,ActiveEnterTimestamp", "--timestamp=unix", UNIT)
+    r = systemctl(ctx, "show", "-p", "ActiveState,SubState,MainPID,ActiveEnterTimestamp", "--timestamp=unix", UNIT)
     if r.code != 0:
         raise Stop(
             f"systemctl --user show failed: {r.output.strip()}",
@@ -75,6 +75,16 @@ def unit_state(ctx):
 
 
 # Profiles
+
+
+def leftover_bench_backup(ctx):
+    p = ctx.paths
+    if p.bench_backup.exists():
+        raise Stop(
+            f"{p.bench_backup} is left from a qlm bench that was killed before it restored the profile",
+            f"Restore it with: mv {p.bench_backup} {p.active_env}, then run qlm stop and qlm start",
+        )
+
 
 
 def active_profile(ctx):
@@ -205,7 +215,7 @@ def _wait_ready(ctx, t0, polled=False):
 
 
 def _give_up(ctx, t0, todo):
-    _systemctl(ctx, "stop", UNIT)
+    systemctl(ctx, "stop", UNIT)
     since = int(t0.timestamp())
     tail = ctx.runner.run(
         ["journalctl", "--user", "-u", UNIT, "--no-pager", "-n", str(JOURNAL_LINES), "--since", f"@{since}"],
@@ -267,8 +277,8 @@ def start(ctx):
     profile = preflight(ctx)
     check_ollama(ctx)
     check_vram(ctx, profile)
-    _systemctl(ctx, "reset-failed", UNIT)  # clears an earlier start limit; failure here is harmless
-    r = _systemctl(ctx, "start", UNIT)
+    systemctl(ctx, "reset-failed", UNIT)  # clears an earlier start limit; failure here is harmless
+    r = systemctl(ctx, "start", UNIT)
     if r.code != 0:
         raise Stop(f"systemctl --user start failed: {r.output.strip()}", "Check the unit with qlm logs")
     ready = _wait_ready(ctx, t0)
@@ -284,8 +294,8 @@ def bring_up(ctx, restart):
     An earlier failed state is cleared first, so a start limit left by a bad profile doesn't block this start.
     """
     t0 = ctx.clock.now()
-    _systemctl(ctx, "reset-failed", UNIT)
-    r = _systemctl(ctx, "restart" if restart else "start", UNIT)
+    systemctl(ctx, "reset-failed", UNIT)
+    r = systemctl(ctx, "restart" if restart else "start", UNIT)
     ready = _wait_ready(ctx, t0) if r.code == 0 else None
     if ready is None:
         try:
@@ -319,7 +329,7 @@ def profile_use(ctx, name):
         return 0
     t0 = ctx.clock.now()
     back = f"qlm profile use {previous}" if previous != "custom" else "qlm profile use agent"
-    r = _systemctl(ctx, "restart", UNIT)
+    r = systemctl(ctx, "restart", UNIT)
     if r.code != 0:
         raise Stop(f"systemctl --user restart failed: {r.output.strip()}", f"Go back with {back}")
     ready = _wait_ready(ctx, t0)
@@ -335,13 +345,13 @@ def profile_use(ctx, name):
 def stop(ctx):
     state = unit_state(ctx)
     if state.active == "failed":
-        _systemctl(ctx, "reset-failed", UNIT)
+        systemctl(ctx, "reset-failed", UNIT)
         ctx.say("qlm-server was in the failed state; cleared it.")
         return 0
     if not state.running:
         ctx.say("qlm-server is not running.")
         return 0
-    r = _systemctl(ctx, "stop", UNIT)
+    r = systemctl(ctx, "stop", UNIT)
     if r.code != 0:
         raise Stop(f"systemctl --user stop failed: {r.output.strip()}", "Check the unit with qlm logs")
     ctx.say("qlm-server stopped.")

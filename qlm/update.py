@@ -34,15 +34,6 @@ def old_build(ctx):
     return ctx.paths.llama_opt / target.name
 
 
-def leftover_bench_backup(ctx):
-    p = ctx.paths
-    if p.bench_backup.exists():
-        raise service.Stop(
-            f"{p.bench_backup} is left from a qlm bench that was killed before it restored the profile",
-            f"Restore it with: mv {p.bench_backup} {p.active_env}, then run qlm stop and qlm start",
-        )
-
-
 def _run(ctx, tag, commit):
     p = ctx.paths
     old = old_build(ctx)
@@ -50,7 +41,7 @@ def _run(ctx, tag, commit):
         raise service.Stop(f"{p.llama_current} doesn't lead to an installed llama-server build", "Run qlm install")
     if not p.unit_file.exists():
         raise service.Stop("the qlm-server unit is not installed", "Run qlm install")
-    leftover_bench_backup(ctx)
+    service.leftover_bench_backup(ctx)
     if tag == old.name:
         ctx.say(f"llama.cpp is already on {tag}.")
         return 0
