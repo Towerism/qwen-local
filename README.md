@@ -36,7 +36,9 @@ qlm con --print     # show what --apply would change in ~/.config/con/con.conf
 qlm con --apply     # write the settings, after a backup; undo with qlm con --revert
 ```
 
-Start Con again and ask its agent something. That last check is by hand.
+Start Con again, open a new tab and ask its agent something. That last check is by hand.
+
+Tabs that Con restores from your last session keep the provider they had before, because Con saves each tab's provider in `~/.local/share/con/session.json` and that overrides `con.conf`. Only new tabs pick up the local model. If a restored tab says `No API key found for anthropic`, switch that tab's provider to OpenAI-compatible in Con's provider picker, or close it and open a new one.
 
 ## Everyday use
 
