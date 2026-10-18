@@ -3,7 +3,8 @@
 These read real tool output and hash the real model files, so they take tens of seconds.
 They never build or download. The server test starts and stops the real qlm-server
 (about 20 GiB of VRAM for a few minutes) and leaves a smoke log in ~/.local/state/qlm/smoke/;
-it skips when the server is already running, so it never stops one you started.
+it skips when the server is already running, so it never stops one you started. The bench test
+does the same and leaves a result in ~/.local/state/qlm/bench/.
 """
 
 import io
@@ -79,3 +80,27 @@ def test_con_print_reads_the_real_config_without_showing_keys(repo):
     assert "con.agent.provider = " in ctx.out.getvalue()
     if key:
         assert key not in ctx.out.getvalue()
+
+
+def test_a_quick_bench_measures_the_real_server_and_saves_a_result(repo):
+    import json
+
+    from qlm import service
+
+    ctx = real_ctx(Path.home(), repo)
+    if not ctx.paths.unit_file.exists():
+        pytest.skip("qlm install has not been run on this machine")
+    if service.unit_state(ctx).running:
+        pytest.skip("qlm-server is already running; this test only stops a server it started")
+    try:
+        assert cli.main(["start"], ctx) == 0, ctx.err.getvalue()
+        bench = real_ctx(Path.home(), repo)
+        assert cli.main(["bench", "--quick"], bench) == 0, bench.out.getvalue() + bench.err.getvalue()
+        result = Path(bench.out.getvalue().rstrip().splitlines()[-1].split("Results: ", 1)[1])
+        data = json.loads(result.read_text())
+        assert data["quick"] is True
+        assert data["measures"]["mtp_on.pp_2048.tok_s"] > 0
+        assert data["measures"]["mtp_on.gen_code.tok_s"] > 0
+        assert data["measures"]["mtp_on.peak_vram_gib"] > 0
+    finally:
+        assert cli.main(["stop"], real_ctx(Path.home(), repo)) == 0
