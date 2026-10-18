@@ -47,6 +47,9 @@ def build_parser():
     update.add_argument("--tag", required=True, type=_pattern(r"b[0-9]+", "a tag like b11700"), help="llama.cpp tag")
     update.add_argument("--commit", required=True, type=_pattern(r"[0-9a-f]{40}", "a 40-character lower-case commit"),
                         help="the full commit the tag must point at")
+    uninstall = sub.add_parser("uninstall", help="remove the service, builds, link and config; keeps logs and models")
+    uninstall.add_argument("--models", action="store_true", help="also remove the model files")
+    uninstall.add_argument("--yes", action="store_true", help="don't ask before removing")
     logs = sub.add_parser("logs", help="show the server's journal")
     logs.add_argument("-n", dest="lines", type=_positive_int, default=50, help="number of lines (default 50)")
     logs.add_argument("-f", dest="follow", action="store_true", help="keep following new lines")
@@ -135,6 +138,10 @@ def _dispatch(args, ctx):
         from qlm import update
 
         return update.run(ctx, tag=args.tag, commit=args.commit)
+    if args.command == "uninstall":
+        from qlm import uninstall
+
+        return uninstall.run(ctx, models=args.models, yes=args.yes)
     if args.command == "smoke":
         from qlm import smoke
 
