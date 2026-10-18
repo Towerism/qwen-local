@@ -54,7 +54,7 @@ flowchart LR
 | `~/.local/share/qlm/models/` | The two GGUF files and `SHA256SUMS` | `qlm fetch` |
 | `~/.config/qlm/active.env` | The active profile as `LLAMA_ARG_*` variables. `qlm install` writes the `agent` profile here, so it always exists. | `qlm install`, `qlm profile use` |
 | `~/.config/systemd/user/qlm-server.service` | Service unit | `qlm install` |
-| `~/.local/state/qlm/` | Bench results (JSON), smoke logs, and `backups/` holding timestamped copies of `con.conf` | `qlm bench`, `qlm smoke`, `qlm con` |
+| `~/.local/state/qlm/` | Bench results (JSON), `smoke/` holding one log per `qlm smoke` run, and `backups/` holding timestamped copies of `con.conf`. Both folders are mode 0700 and their files 0600. | `qlm bench`, `qlm smoke`, `qlm con`, `qlm suggest` |
 
 ## Commands
 
@@ -65,12 +65,12 @@ Each command does one job and exits non-zero on failure with a message that name
 | `qlm doctor` | Read-only preflight: driver and `nvidia-smi`, `nvcc` and host compiler, disk space, port 9931 free, models loaded in Ollama, VRAM held by other processes, `~/.local/bin` on `PATH`, Con config keys | Prints a pass/fail line per check |
 | `qlm install [--tag b11669] [--rebuild]` | Resolve the tag to its commit and stop unless it matches ADR 0001, then check out that commit, build with `-DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=89 -DBUILD_SHARED_LIBS=OFF`, and retry the configure step with `-DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-15` if `nvcc` rejects the host compiler. Copy the new binaries in under staged names; they replace the old ones only after the `--help` check passes. Then switch `current`, install the unit and symlink, write the `agent` profile to `active.env`, and create the API key file (ADR 0003). An installed tag skips the build unless `--rebuild` is given. `--tag` accepts only the pinned tag until `qlm update` exists. | `llama-server --help` lists every variable the profiles use as `(env: NAME)`, and `draft-mtp` among the `--spec-type` values |
 | `qlm fetch [--vision]` | Download the model and MTP files with resume from the pinned Hugging Face revision (`/resolve/<revision>/`), then check SHA-256 against the hashes recorded in ADR 0002, not hashes fetched at download time. `--vision` adds `mmproj-BF16.gguf`. After a run in which every file verified, write `SHA256SUMS`. | All hashes match the recorded ones |
-| `qlm profile use <agent\|long\|vision>` | Render `active.env` from `profiles/<name>.env`; restart the service if it is running | `active.env` matches the profile |
-| `qlm start` | Check free VRAM (total minus used, from `nvidia-smi --query-gpu=memory.total,memory.used`) against the profile's `vram_gib` plus 0.5 GiB. Refuse if `ollama ps` shows a model using the GPU, and print the `ollama stop <name>` command. A CPU-only model such as `con-suggest` is allowed. Then start the service, wait for `/health` to return 200 (up to 180 s), and stop the unit if the wait runs out, so it doesn't keep retrying | Reports the server's VRAM and load time |
-| `qlm stop`, `qlm status`, `qlm logs` | Wrap `systemctl --user` and `journalctl --user`. `status` adds VRAM, profile, context use from `/metrics`, and uptime. | |
-| `qlm smoke` | Seven API checks, listed below | All pass, or each failure is named |
+| `qlm profile use <agent\|long\|vision>` | Render `active.env` from `profiles/<name>.env`, after checking that the model files it names exist. If the service is running, first run the Ollama and VRAM checks from `qlm start`, counting the running server's own VRAM as free, then restart it and wait and report as `qlm start` does | `active.env` matches the profile |
+| `qlm start` | Check free VRAM (total minus used, from `nvidia-smi --query-gpu=memory.total,memory.used`) against the profile's `vram_gib` plus 0.5 GiB. Refuse if `ollama ps` shows a model using the GPU, and print the `ollama stop <name>` command. A CPU-only model such as `con-suggest` is allowed. Then clear any earlier start limit with `systemctl --user reset-failed`, start the service, wait for `/health` to return 200 (up to 180 s), and stop the unit if the wait runs out or the server exits, so it doesn't keep retrying | Reports the server's VRAM and load time |
+| `qlm stop`, `qlm status`, `qlm logs [-n N] [-f]` | Wrap `systemctl --user` and `journalctl --user`. `status` adds VRAM, the profile, uptime, and the largest request so far (`llamacpp:n_tokens_max` from `/metrics`) against the context size. The pinned llama-server has no metric for the context in use right now, and `/slots`, which has it, stays off. | |
+| `qlm smoke` | Eight API checks, listed below | All pass, or each failure is named |
 | `qlm bench` | Measure prompt and generation speed, MTP acceptance, cache reuse and peak VRAM; save JSON and compare with the last run | Results saved under `~/.local/state/qlm/bench/` |
-| `qlm con --print\|--apply\|--revert` | Show, write or undo the Con keys from ADR 0003. `--apply` refuses while Con is running (`pgrep -x con`; Con's binary is named `con`), backs up first with mode 0600, writes the new file atomically with the original's mode, sets the API key, and removes `con.agent.temperature` if set so the server's sampling applies. | `--apply` re-reads the file and finds exactly the expected values. Checking that Con's agent answers is a manual step. |
+| `qlm con --print\|--apply\|--revert` | Show, write or undo the Con keys from ADR 0003. `--apply` refuses while Con is running (`pgrep -x con`; Con's binary is named `con`) and while the file has dashed `openai-compatible` keys. It backs up first with mode 0600, writes the new file atomically with the original's mode, sets the API key, and removes `con.agent.temperature` if set so the server's sampling applies. It leaves the suggestion model on when `qlm suggest --enable` pointed it at Ollama's `con-suggest`. `--revert` restores the newest backup. | `--apply` re-reads the file and finds exactly the expected values, or puts the old file back. Checking that Con's agent answers is a manual step. |
 | `qlm suggest --enable\|--disable` | `--enable` creates the CPU-only `con-suggest` Ollama model and sets `con.agent.suggestion_model.enabled = true`, `.provider = "ollama"` and `.model = "con-suggest"`. `--disable` sets `enabled = false`. Same Con-running and backup rules as `qlm con`. | |
 | `qlm update --tag <bN> --commit <sha>` | In this order: build the new tag beside the old one, check its commit and its `--help`, check free VRAM as `qlm start` does, switch `current` to it, restart, run `qlm smoke`. If smoke fails, switch `current` back and restart. If the service was stopped beforehand, it is stopped again at the end. Nothing is switched if the build, the checks or the VRAM preflight fail. | Smoke passes on the new tag, or the old tag is back in `current` |
 | `qlm uninstall [--models]` | Stop and remove the unit, builds and symlinks; keep model files unless `--models` | |
@@ -154,8 +154,9 @@ The start limit stops systemd after three failed starts in two minutes. Without 
 5. The Anthropic endpoint `/v1/messages` returns a `tool_use` block for the same tool.
 6. A thinking request returns `reasoning_content` separate from `content`.
 7. MTP is active: the response's `timings` show accepted draft tokens above zero. This check runs only when the active profile sets `LLAMA_ARG_SPEC_TYPE`.
+8. A request without the API key gets 401, which shows the lock-down described under the `agent` profile is in effect.
 
-The exact tool schemas, prompts and timeouts belong in the feature spec for `qlm smoke`.
+The exact tool schemas, prompts and timeouts are in the spec on [issue #4](https://github.com/Towerism/qwen-local/issues/4). The smoke requests replace Con's cached prompt in the server's single slot, so `qlm smoke` warns that Con's next turn re-reads its context.
 
 ### What `qlm bench` measures
 
@@ -179,7 +180,7 @@ The exact tool schemas, prompts and timeouts belong in the feature spec for `qlm
 ## How the code is tested
 
 - **Unit tests (pytest, default run).** `subprocess` calls, HTTP and the clock are passed in as parameters, so tests use fakes. Fixtures hold outputs in the shape captured from this machine: `nvidia-smi` queries, `ollama ps`, a `llama-server --help` from the pinned tag, and recorded `/v1/chat/completions` responses. The repo is public, so fixtures are scrubbed before commit: no usernames, home paths, process lists or real prompt text. A test fails if any fixture contains `/home/`. Test cases cover profile rendering, the VRAM preflight maths, the checksum and resume logic, Con config editing (unknown keys, existing values, Con running), and update rollback.
-- **GPU tests (`pytest -m gpu`, opt-in).** These run `qlm smoke` and a short `qlm bench` against the real server.
+- **Machine tests (`pytest -m machine`, opt-in).** These run the real tools on this machine: `qlm doctor`, verifying the model files, and starting the real server to run `qlm status` and `qlm smoke` before stopping it again. A short `qlm bench` joins them in issue #5.
 - The test plan is written per feature during the spec step (`senior-qa`), before the tests.
 
 ## Not in scope

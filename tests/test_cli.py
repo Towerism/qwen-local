@@ -20,6 +20,10 @@ EXPECTED_FILES = [
     "qlm/doctor.py",
     "qlm/install.py",
     "qlm/fetch.py",
+    "qlm/files.py",
+    "qlm/con.py",
+    "qlm/service.py",
+    "qlm/smoke.py",
     "profiles/agent.env",
     "profiles/long.env",
     "profiles/vision.env",
@@ -43,7 +47,7 @@ def test_help_through_symlink_from_another_directory(tmp_path, repo, monkeypatch
 
     assert exc.value.code == 0
     out = capsys.readouterr().out
-    for name in ("doctor", "install", "fetch"):
+    for name in ("doctor", "install", "fetch", "profile", "start", "stop", "status", "logs", "smoke", "con", "suggest"):
         assert name in out
 
 
@@ -61,6 +65,20 @@ def test_unknown_subcommand_is_a_usage_error(home, repo):
 def test_unknown_option_is_a_usage_error(home, repo):
     ctx = make_ctx(home, repo)
     assert cli.main(["fetch", "--nope"], ctx) == 2
+
+
+def test_a_closed_output_pipe_ends_quietly(home, repo):
+    class ClosedPipe:
+        def write(self, text):
+            raise BrokenPipeError(32, "Broken pipe")
+
+        def flush(self):
+            raise BrokenPipeError(32, "Broken pipe")
+
+    ctx = make_ctx(home, repo)
+    ctx.out = ClosedPipe()
+    assert cli.main(["con", "--print"], ctx) == 1
+    assert "file error" not in ctx.err.getvalue()
 
 
 def test_install_rejects_other_tags_before_running_anything(home, repo):

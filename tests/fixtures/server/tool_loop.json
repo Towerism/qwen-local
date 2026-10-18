@@ -1,0 +1,39 @@
+{
+ "choices": [
+  {
+   "finish_reason": "stop",
+   "index": 0,
+   "message": {
+    "role": "assistant",
+    "content": "Order A-7731 has been **shipped**. The tracking code is **ZQ-48213**.",
+    "reasoning_content": "The user asked for the shipping status of order A-7731. I called the lookup_order tool and got the result: status is \"shipped\" with tracking code \"ZQ-48213\". Now I should provide a clear answer summarizing this information.\n"
+   }
+  }
+ ],
+ "created": 1792206582,
+ "model": "qwen3.8-27b",
+ "system_fingerprint": "b11669-620d2225c",
+ "object": "chat.completion",
+ "usage": {
+  "completion_tokens": 89,
+  "prompt_tokens": 437,
+  "total_tokens": 526,
+  "prompt_tokens_details": {
+   "cached_tokens": 350
+  }
+ },
+ "id": "chatcmpl-JKM9T7yHh50IcoIRCCszz3wsjmb9BSDv",
+ "timings": {
+  "cache_n": 350,
+  "prompt_n": 87,
+  "prompt_ms": 151.048,
+  "prompt_per_token_ms": 1.736183908045977,
+  "prompt_per_second": 575.9758487368254,
+  "predicted_n": 89,
+  "predicted_ms": 854.7,
+  "predicted_per_token_ms": 9.7125,
+  "predicted_per_second": 102.96010296010294,
+  "draft_n": 84,
+  "draft_n_accepted": 61
+ }
+}

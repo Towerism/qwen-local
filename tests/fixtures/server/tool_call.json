@@ -1,0 +1,49 @@
+{
+ "choices": [
+  {
+   "finish_reason": "tool_calls",
+   "index": 0,
+   "message": {
+    "role": "assistant",
+    "content": "",
+    "reasoning_content": "The user is asking to look up the shipping status of order A-7731 using the lookup_order tool. The order ID format matches the pattern ^[A-Z]-[0-9]{4}$. A-7731 fits: \"A\" is an uppercase letter, followed by a hyphen, then 4 digits. So this is a valid call.\n\nThere are no other independent calls to make, so I'll just execute this single call.\n",
+    "tool_calls": [
+     {
+      "type": "function",
+      "function": {
+       "name": "lookup_order",
+       "arguments": "{\"order_id\":\"A-7731\"}"
+      },
+      "id": "OnK5fiMWpKCANWtIQbqlI87FDbb2YPlO"
+     }
+    ]
+   }
+  }
+ ],
+ "created": 1792206581,
+ "model": "qwen3.8-27b",
+ "system_fingerprint": "b11669-620d2225c",
+ "object": "chat.completion",
+ "usage": {
+  "completion_tokens": 133,
+  "prompt_tokens": 354,
+  "total_tokens": 487,
+  "prompt_tokens_details": {
+   "cached_tokens": 0
+  }
+ },
+ "id": "chatcmpl-jZZhlROU0mGykj2F0scLybMA5CBQbwDj",
+ "timings": {
+  "cache_n": 0,
+  "prompt_n": 354,
+  "prompt_ms": 313.647,
+  "prompt_per_token_ms": 0.8860084745762712,
+  "prompt_per_second": 1128.6573759672497,
+  "predicted_n": 133,
+  "predicted_ms": 1229.155,
+  "predicted_per_token_ms": 9.311780303030304,
+  "predicted_per_second": 107.39084981145584,
+  "draft_n": 120,
+  "draft_n_accepted": 92
+ }
+}

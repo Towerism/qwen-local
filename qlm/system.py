@@ -4,6 +4,8 @@ Commands receive these through a Ctx so tests can replace each one with a fake.
 """
 
 import datetime
+import http.client
+import json
 import os
 import re
 import secrets
@@ -42,8 +44,27 @@ class HttpResponse:
     body: Iterable[bytes]
 
 
+@dataclass
+class LocalResponse:
+    status: int
+    headers: dict
+    body: bytes
+
+
+SERVER = "http://127.0.0.1:9931"
+
+
 class RedirectRefused(Exception):
     """A download redirected somewhere other than HTTPS huggingface.co or *.hf.co."""
+
+
+class ServerUnreachable(Exception):
+    """A request to the local server got no HTTP answer: refused, timed out, redirected or not local."""
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 def redirect_allowed(url):
@@ -81,6 +102,15 @@ class Runner:
             return RunResult(126, "", str(e))
         return RunResult(p.returncode, p.stdout, p.stderr)
 
+    def passthrough(self, argv):
+        """Run a command on the terminal, uncaptured (progress bars, journalctl -f). Returns its exit code."""
+        try:
+            return subprocess.run([str(a) for a in argv]).returncode
+        except FileNotFoundError:
+            return 127
+        except OSError:
+            return 126
+
     def which(self, name, extra_dirs=()):
         found = shutil.which(name)
         if found:
@@ -93,8 +123,43 @@ class Runner:
 
 
 class Http:
-    def __init__(self):
+    def __init__(self, server=SERVER):
         self.opener = urllib.request.build_opener(SafeRedirectHandler)
+        # Requests carrying the API key must reach 127.0.0.1 directly: no proxy, no redirects.
+        self.local_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect)
+        self.server = server
+
+    def request(self, method, url, headers=None, json_body=None, timeout_s=10):
+        """One request to the local llama-server. Never puts header values in an error message."""
+        if not (url == self.server or url.startswith(self.server + "/")):
+            raise ServerUnreachable(f"refused a request outside {self.server}")
+        data = None
+        all_headers = {"User-Agent": USER_AGENT, **(headers or {})}
+        if json_body is not None:
+            data = json.dumps(json_body).encode()
+            all_headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=data, headers=all_headers, method=method)
+        try:
+            with self.local_opener.open(req, timeout=timeout_s) as resp:
+                return LocalResponse(resp.status, {k.lower(): v for k, v in resp.headers.items()}, resp.read())
+        except urllib.error.HTTPError as e:
+            if 300 <= e.code < 400:
+                raise ServerUnreachable(f"the server answered with a redirect (HTTP {e.code})") from None
+            body = e.read() if e.fp else b""
+            return LocalResponse(e.code, {k.lower(): v for k, v in (e.headers or {}).items()}, body)
+        except urllib.error.URLError as e:
+            reason = e.reason
+            if isinstance(reason, TimeoutError):
+                raise ServerUnreachable(f"timed out after {timeout_s} s") from None
+            raise ServerUnreachable(getattr(reason, "strerror", None) or str(reason)) from None
+        except TimeoutError:
+            raise ServerUnreachable(f"timed out after {timeout_s} s") from None
+        except (ConnectionError, OSError) as e:
+            raise ServerUnreachable(e.strerror or str(e)) from None
+        except http.client.HTTPException as e:
+            # A reply cut off mid-body (the server died) or malformed. Name only the kind:
+            # the exception text could echo part of the request.
+            raise ServerUnreachable(f"broken reply ({type(e).__name__})") from None
 
     def get(self, url, range_start=None, timeout_s=60):
         headers = {"User-Agent": USER_AGENT}
@@ -156,6 +221,9 @@ class Env:
 
     def cpu_count(self):
         return os.cpu_count() or 1
+
+    def xdg_config_home(self):
+        return os.environ.get("XDG_CONFIG_HOME") or None
 
 
 def parse_ss_listener(stdout, host, port):

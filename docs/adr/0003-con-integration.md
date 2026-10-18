@@ -1,6 +1,6 @@
 # ADR 0003: Connect Con through its `openaicompatible` provider, and keep its background requests off the main slot
 
-- **Status:** Accepted (2026-10-16)
+- **Status:** Accepted (2026-10-16), amended 2026-10-17 (see "Amendment" at the end)
 - **Date:** 2026-10-16
 
 ## Decision
@@ -55,3 +55,13 @@ The opt-in setting creates an Ollama model `con-suggest` from `qwen2.5-coder:1.5
 - Why a key on a loopback-only server: a browser on the same desktop can send requests to `127.0.0.1`. CORS stops a page from reading replies, but not from sending simple POSTs that start generations and evict Con's cached prompt. A page can't add an `Authorization` header without passing a CORS check, so the key blocks those requests.
 - `con.agent.auto_context` has no effect in this Con build (`provider.rs:1862` defines it; nothing reads it), so the design doesn't depend on it.
 - Con can also reach llama-server through its `anthropic` provider at `/v1/messages`. That path isn't used, but `qlm smoke` tests it so it stays available as a fallback.
+
+## Amendment (2026-10-17, issue #4)
+
+Building `qlm con` and `qlm suggest` settled three details the decision above left open. The spec on [issue #4](https://github.com/Towerism/qwen-local/issues/4) has the full rules.
+
+- **`qlm con --apply` doesn't undo `qlm suggest --enable`.** Decision 4 keeps suggestions off llama-server. Suggestions sent to Ollama's CPU-only `con-suggest` already meet that, so when the file points the suggestion model there and has it on, `--apply` leaves `con.agent.suggestion_model.enabled` as it is. In every other case it writes `false`, as in the key list above.
+- **`--apply` refuses a file that has dashed `openai-compatible` keys.** Con can't load such a file, and `qlm` only writes keys and never deletes lines it doesn't own, so the user renames them. `qlm doctor` already reports them.
+- **`--revert` restores the newest backup** made by `--apply` or `qlm suggest`. A backup is never deleted, and the file being replaced is saved first as a `.pre-revert` copy.
+
+Two facts from Con's source at `de2d7c7e` shaped the editing rules. Con reads `con.conf` only at startup, and its own saves fail with "configuration changed on disk" when the file changed while it ran (`crates/con-core/src/config.rs:1343-1353`). Its saves drop changed lines and append them at the end (`crates/con-core/src/config/ghostty.rs:451-530`). So `qlm` follows the same line format and never edits while Con runs. Con also migrates `config.toml` or `config.ghostty` only while `con.conf` is absent (`config.rs:1196-1238`), so `--apply` refuses to create `con.conf` when one of those exists.

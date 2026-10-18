@@ -1,0 +1,28 @@
+{
+ "id": "chatcmpl-FQTwdyxS9JOF6R0ZVTw4pqCMfgKzrQqi",
+ "type": "message",
+ "role": "assistant",
+ "content": [
+  {
+   "type": "thinking",
+   "thinking": "The user is asking to check the delivery status of order A-7731. The tool is lookup_order, which takes order_id as a parameter with the pattern ^[A-Z]-[0-9]{4}$. A-7731 matches this pattern.\n",
+   "signature": ""
+  },
+  {
+   "type": "tool_use",
+   "id": "XBNj7Iqn9hbzyV7kEXwwuuZATpH38863",
+   "name": "lookup_order",
+   "input": {
+    "order_id": "A-7731"
+   }
+  }
+ ],
+ "model": "qwen3.8-27b",
+ "stop_reason": "tool_use",
+ "stop_sequence": null,
+ "usage": {
+  "cache_read_input_tokens": 350,
+  "input_tokens": 4,
+  "output_tokens": 93
+ }
+}

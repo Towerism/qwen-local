@@ -1,7 +1,9 @@
 """Checks against the real tools on this machine. Opt in with: python3 -I -m pytest -m machine
 
 These read real tool output and hash the real model files, so they take tens of seconds.
-They never build, download or write outside a temporary directory.
+They never build or download. The server test starts and stops the real qlm-server
+(about 20 GiB of VRAM for a few minutes) and leaves a smoke log in ~/.local/state/qlm/smoke/;
+it skips when the server is already running, so it never stops one you started.
 """
 
 import io
@@ -48,3 +50,32 @@ def test_fetch_verifies_the_files_already_on_disk_without_downloading(repo, tmp_
     ctx.http = NoHttp()
     assert cli.main(["fetch"], ctx) == 0, ctx.err.getvalue()
     assert ctx.out.getvalue().count("already present and verified") == 2
+
+
+def test_the_real_server_starts_passes_smoke_and_stops(repo):
+    from qlm import service
+
+    ctx = real_ctx(Path.home(), repo)
+    if not ctx.paths.unit_file.exists():
+        pytest.skip("qlm install has not been run on this machine")
+    if service.unit_state(ctx).running:
+        pytest.skip("qlm-server is already running; this test only stops a server it started")
+    try:
+        assert cli.main(["start"], ctx) == 0, ctx.err.getvalue()
+        assert "ready in" in ctx.out.getvalue()
+        status = real_ctx(Path.home(), repo)
+        assert cli.main(["status"], status) == 0
+        assert status.out.getvalue().splitlines()[0] == "state: running"
+        smoke = real_ctx(Path.home(), repo)
+        assert cli.main(["smoke"], smoke) == 0, smoke.out.getvalue() + smoke.err.getvalue()
+    finally:
+        assert cli.main(["stop"], real_ctx(Path.home(), repo)) == 0
+
+
+def test_con_print_reads_the_real_config_without_showing_keys(repo):
+    ctx = real_ctx(Path.home(), repo)
+    assert cli.main(["con", "--print"], ctx) == 0
+    key = ctx.paths.api_key.read_text().strip() if ctx.paths.api_key.exists() else None
+    assert "con.agent.provider = " in ctx.out.getvalue()
+    if key:
+        assert key not in ctx.out.getvalue()
