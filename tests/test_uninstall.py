@@ -214,3 +214,16 @@ def test_an_unreachable_user_manager_removes_nothing(home, repo):
     code, ctx, _ = uninstall(home, repo, "--yes", run=run)
     assert code == 1
     assert p.unit_file.exists()
+
+
+def test_ctrl_c_at_the_prompt_cancels_cleanly(home, repo):
+    p = full_install(home, repo)
+
+    class CtrlC(FakeEnv):
+        def ask(self, prompt):
+            raise KeyboardInterrupt
+
+    code, ctx, _ = uninstall(home, repo, env=CtrlC(stdin_tty=True))
+    assert code == 1
+    assert "uninstall cancelled; nothing was removed" in ctx.err.getvalue()
+    assert p.unit_file.exists()

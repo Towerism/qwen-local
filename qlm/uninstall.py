@@ -93,14 +93,18 @@ def _run(ctx, models, yes):
         if not ctx.env.stdin_is_tty():
             ctx.warn("qlm: uninstall needs confirmation. Run it in a terminal, or pass --yes")
             return 2
-        if ctx.env.ask(PROMPT).strip() != "yes":
+        try:
+            answer = ctx.env.ask(PROMPT)
+        except (KeyboardInterrupt, EOFError):
+            answer = ""
+        if answer.strip() != "yes":
             return ctx.fail("uninstall cancelled; nothing was removed", "Run qlm uninstall again to remove them")
 
     if state.running:
-        r = service._systemctl(ctx, "stop", service.UNIT)
+        r = service.systemctl(ctx, "stop", service.UNIT)
         if r.code != 0:
             raise service.Stop(f"systemctl --user stop failed: {r.output.strip()}", "Nothing was removed; stop it and try again")
-    service._systemctl(ctx, "reset-failed", service.UNIT)
+    service.systemctl(ctx, "reset-failed", service.UNIT)
 
     removed = []
     for label, group in steps:
@@ -129,7 +133,7 @@ def _remove(path):
 
 
 def _reload(ctx):
-    r = service._systemctl(ctx, "daemon-reload")
+    r = service.systemctl(ctx, "daemon-reload")
     if r.code != 0:
         ctx.warn(f"warning: systemctl --user daemon-reload failed: {r.output.strip()}")
 
