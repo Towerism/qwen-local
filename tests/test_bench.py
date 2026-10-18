@@ -554,3 +554,23 @@ def test_ctrl_c_and_sigterm_are_ignored_while_the_profile_is_restored(home, repo
     assert code == 0, out(ctx)
     assert handlers[0] != (signal.SIG_IGN, signal.SIG_IGN)
     assert handlers[1] == (signal.SIG_IGN, signal.SIG_IGN)
+
+
+def test_a_file_error_after_the_backup_still_restores(home, repo, monkeypatch):
+    from qlm import files
+
+    real = files.replace_atomically
+    calls = []
+
+    def disk_full_once(path, data, mode):
+        calls.append(path)
+        if len(calls) == 1:
+            raise OSError(28, "No space left on device")
+        return real(path, data, mode)
+
+    monkeypatch.setattr(files, "replace_atomically", disk_full_once)
+    code, ctx, p = run_bench(home, repo)
+    assert code == 1
+    assert "No space left on device" in ctx.err.getvalue()
+    assert p.active_env.read_text() == rendered(home, repo, "agent")
+    assert not p.bench_backup.exists()

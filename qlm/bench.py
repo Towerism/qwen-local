@@ -481,7 +481,7 @@ def _measure_mtp_off(ctx, bench, profile, state, original):
         if not service.bring_up(ctx, restart=True):
             raise MeasureFailed("the server didn't become ready with MTP off")
         bench.mode("mtp_off", service.unit_state(ctx).pid)
-    except (MeasureFailed, service.Stop, KeyboardInterrupt) as e:
+    except (Exception, KeyboardInterrupt) as e:  # anything, so the restore below always runs
         failure = e
     restored = _restore(ctx, original)
     if not restored:
@@ -496,7 +496,9 @@ def _measure_mtp_off(ctx, bench, profile, state, original):
 
 
 def _describe(failure):
-    return "interrupted" if isinstance(failure, KeyboardInterrupt) else str(getattr(failure, "what", failure))
+    if isinstance(failure, KeyboardInterrupt):
+        return "interrupted"
+    return str(getattr(failure, "what", failure))
 
 
 def _restore(ctx, original):
