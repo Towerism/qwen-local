@@ -278,6 +278,25 @@ def start(ctx):
     return 0
 
 
+def bring_up(ctx, restart):
+    """Restart (or start) the unit and wait as qlm start does. True when ready; otherwise the unit is stopped.
+
+    An earlier failed state is cleared first, so a start limit left by a bad profile doesn't block this start.
+    """
+    t0 = ctx.clock.now()
+    _systemctl(ctx, "reset-failed", UNIT)
+    r = _systemctl(ctx, "restart" if restart else "start", UNIT)
+    ready = _wait_ready(ctx, t0) if r.code == 0 else None
+    if ready is None:
+        try:
+            _give_up(ctx, t0, "")
+        except Stop:
+            pass  # _give_up already stopped the unit and printed the journal
+        return False
+    _report_ready(ctx, t0, ready, active_profile_name(ctx))
+    return True
+
+
 def profile_use(ctx, name):
     p = ctx.paths
     profile = profiles.load(p.profiles_dir / f"{name}.env")

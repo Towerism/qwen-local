@@ -82,7 +82,7 @@ def _run(ctx, tag, commit):
 
 def _start_and_smoke(ctx, tag, was_running):
     """Bring the server up on the new build and run smoke. Returns what failed, or None."""
-    if not _bring_up(ctx, was_running):
+    if not service.bring_up(ctx, restart=was_running):
         return f"the server didn't become ready on {tag}"
     failed = []
     if smoke.run(ctx, failed) != 0:
@@ -90,30 +90,11 @@ def _start_and_smoke(ctx, tag, was_running):
     return None
 
 
-def _bring_up(ctx, restart):
-    """Restart (or start) the unit and wait as qlm start does. True when ready; otherwise the unit is stopped."""
-    t0 = ctx.clock.now()
-    if restart:
-        r = service._systemctl(ctx, "restart", service.UNIT)
-    else:
-        service._systemctl(ctx, "reset-failed", service.UNIT)
-        r = service._systemctl(ctx, "start", service.UNIT)
-    ready = service._wait_ready(ctx, t0) if r.code == 0 else None
-    if ready is None:
-        try:
-            service._give_up(ctx, t0, "")
-        except service.Stop:
-            pass
-        return False
-    service._report_ready(ctx, t0, ready, service.active_profile_name(ctx))
-    return True
-
-
 def _roll_back(ctx, old, tag, was_running, failure):
     with interrupts.deferred():
         install.point_current(ctx, old)
         if was_running:
-            if not _bring_up(ctx, restart=True):
+            if not service.bring_up(ctx, restart=True):
                 return ctx.fail(
                     f"{failure}, and {old.name} didn't become ready either, so the server is stopped",
                     "Run qlm start, and qlm logs to see why",
