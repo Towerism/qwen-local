@@ -1,6 +1,7 @@
 """qlm bench against a fake llama-server whose timings are fixed, so every number is known in advance."""
 
 import json
+import os
 import shutil
 import signal
 import stat
@@ -574,3 +575,17 @@ def test_a_file_error_after_the_backup_still_restores(home, repo, monkeypatch):
     assert "No space left on device" in ctx.err.getvalue()
     assert p.active_env.read_text() == rendered(home, repo, "agent")
     assert not p.bench_backup.exists()
+
+
+def test_ctrl_c_and_sigterm_are_ignored_while_the_backup_is_written(home, repo, monkeypatch):
+    real_fsync = os.fsync
+    handlers = []
+
+    def recording_fsync(fd):
+        handlers.append((signal.getsignal(signal.SIGINT), signal.getsignal(signal.SIGTERM)))
+        return real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", recording_fsync)
+    code, ctx, p = run_bench(home, repo)
+    assert code == 0, out(ctx)
+    assert handlers[0] == (signal.SIG_IGN, signal.SIG_IGN)  # the backup is the first file bench writes

@@ -470,11 +470,14 @@ def _measure_mtp_off(ctx, bench, profile, state, original):
     p = ctx.paths
     service.check_ollama(ctx)
     service.check_vram(ctx, profile, credit_mib=service.server_vram_mib(ctx, state.pid) or 0)
-    fd = os.open(p.bench_backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "wb") as f:
-        f.write(original)
-        f.flush()
-        os.fsync(f.fileno())
+    # A Ctrl-C halfway through would leave a partial backup, and the fix qlm prints for a leftover
+    # backup (mv it over active.env) would then lose the profile.
+    with interrupts.deferred():
+        fd = os.open(p.bench_backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(original)
+            f.flush()
+            os.fsync(f.fileno())
     failure = None
     try:
         files.replace_atomically(p.active_env, mtp_off_variant(original.decode()).encode(), 0o600)
