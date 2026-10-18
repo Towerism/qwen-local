@@ -189,9 +189,16 @@ def _build(ctx, tag, required, bin_dir, log):
 
 
 def _switch_current(ctx, tag):
+    """Point `current` at this tag, unless it already leads to another working build.
+
+    A working build there was put in place by `qlm update`; switching back would undo it.
+    """
     target = ctx.paths.tag_dir(tag)
     current = ctx.paths.llama_current
     if current.is_symlink() and os.readlink(current) == str(target):
+        return False
+    if current.is_symlink() and (current / "bin/llama-server").exists():
+        ctx.say(f"current is on {os.path.basename(os.readlink(current))}, set by qlm update; leaving it there.")
         return False
     tmp = current.with_name(f".current.tmp-{os.getpid()}")
     if tmp.is_symlink() or tmp.exists():

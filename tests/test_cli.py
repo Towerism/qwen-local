@@ -85,7 +85,7 @@ def test_install_rejects_other_tags_before_running_anything(home, repo):
     ctx = make_ctx(home, repo)
     assert cli.main(["install", "--tag", "b11670"], ctx) == 2
     assert ctx.runner.calls == []
-    assert "qlm update" in ctx.err.getvalue()
+    assert "qlm update --tag b11670 --commit" in ctx.err.getvalue()
 
 
 def test_repo_has_the_specified_layout(repo):

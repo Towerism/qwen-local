@@ -351,3 +351,35 @@ def test_fallback_compiler_is_the_literal_usr_bin_path(home, repo):
     m = Machine(home, repo, configure=configure, which={"g++-15": "/opt/elsewhere/g++-15", "/usr/bin/g++-15": "/usr/bin/g++-15"})
     assert m.install()[0] == 0
     assert "-DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-15" in m.runner.ran(*CONFIGURE)[1]
+
+
+def working_build(m, tag):
+    server = m.paths.tag_dir(tag) / "bin" / "llama-server"
+    server.parent.mkdir(parents=True)
+    server.write_bytes(b"server-updated")
+    return m.paths.tag_dir(tag)
+
+
+def test_install_leaves_current_on_a_tag_that_qlm_update_set(home, repo):
+    m = Machine(home, repo)
+    updated = working_build(m, "b11700")
+    m.paths.llama_current.parent.mkdir(parents=True, exist_ok=True)
+    m.paths.llama_current.symlink_to(updated)
+
+    code, ctx = m.install()
+
+    assert code == 0, ctx.err.getvalue()
+    assert os.readlink(m.paths.llama_current) == str(updated)
+    assert "current is on b11700, set by qlm update" in ctx.out.getvalue()
+    assert (m.paths.tag_dir(TAG) / "bin" / "llama-server").exists()
+
+
+def test_install_repoints_a_current_whose_build_is_gone(home, repo):
+    m = Machine(home, repo)
+    m.paths.llama_opt.mkdir(parents=True)
+    m.paths.llama_current.symlink_to(m.paths.llama_opt / "b11700")
+
+    code, ctx = m.install()
+
+    assert code == 0, ctx.err.getvalue()
+    assert os.readlink(m.paths.llama_current) == str(m.paths.tag_dir(TAG))

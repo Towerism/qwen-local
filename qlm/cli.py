@@ -20,7 +20,7 @@ def build_parser():
     sub.required = True
     sub.add_parser("doctor", help="check this machine before installing (read-only)")
     install = sub.add_parser("install", help="build llama.cpp and install the service, profile and API key")
-    install.add_argument("--tag", default=pins.LLAMA_TAG, help=f"llama.cpp tag (only {pins.LLAMA_TAG} for now)")
+    install.add_argument("--tag", default=pins.LLAMA_TAG, help=f"llama.cpp tag; only the pinned {pins.LLAMA_TAG} (use qlm update for others)")
     install.add_argument("--rebuild", action="store_true", help="build again even if this tag is installed")
     fetch = sub.add_parser("fetch", help="download and verify the pinned model files")
     fetch.add_argument("--vision", action="store_true", help="also fetch the vision projector")
@@ -88,7 +88,8 @@ def _dispatch(args, ctx):
     if args.command == "install":
         if args.tag != pins.LLAMA_TAG:
             print(
-                f"qlm: tag {args.tag} is not supported. Only {pins.LLAMA_TAG} is pinned; other tags arrive with qlm update.",
+                f"qlm: qlm install builds only the pinned tag {pins.LLAMA_TAG}. "
+                f"To move to {args.tag}, run qlm update --tag {args.tag} --commit <its commit>.",
                 file=ctx.err,
             )
             return 2
