@@ -1,17 +1,15 @@
 """`qlm uninstall [--models] [--yes]`: remove what qlm install put in place, after listing it and asking.
 
-It keeps ~/.local/state/qlm/ (bench results, logs and the con.conf backups qlm con --revert needs),
-and the model files unless --models is given. It never edits con.conf.
+It keeps ~/.local/state/qlm/ (bench results and logs), and the model files unless --models is given.
 """
 
 import os
 import re
 import shutil
 
-from qlm import con, service
+from qlm import service
 
 BUILD_NAME = re.compile(r"b[0-9]+")
-CON_BASE_URL = "http://127.0.0.1:9931/v1"
 PROMPT = "Type yes to remove these:"
 
 
@@ -45,28 +43,13 @@ def plan(ctx, models):
         ("config", [p.config_dir] if exists(p.config_dir) else []),
         ("models", [p.models] if models and exists(p.models) else []),
     ]
-    keep = [
-        (p.state_dir, "bench results, logs, and the con.conf backups that qlm con --revert restores"),
-    ]
+    keep = [(p.state_dir, "bench results and logs")]
     if not models:
         keep.append((p.models, "the model files (add --models to remove them)"))
-    keep += [
-        (p.repo, "this repo"),
-        (p.con_conf, "Con's settings, which still hold the API key; harmless once the server is gone"),
-        ("con-suggest", "Ollama's model, if qlm suggest --enable created it"),
-    ]
+    keep.append((p.repo, "this repo"))
     if exists(p.qlm_link) and not _our_link(p):
         keep.append((p.qlm_link, "it isn't a link to this repo's bin/qlm"))
     return steps, keep
-
-
-def _con_points_here(ctx):
-    try:
-        lines = ctx.paths.con_conf.read_text().split("\n")
-    except OSError:
-        return False
-    return (con.current_value(lines, "con.agent.provider") == "openaicompatible"
-            and con.current_value(lines, "con.agent.providers.openaicompatible.base_url") == CON_BASE_URL)
 
 
 def _run(ctx, models, yes):
@@ -85,9 +68,6 @@ def _run(ctx, models, yes):
     ctx.say("Will keep:")
     for what, why in keep:
         ctx.say(f"  {what}: {why}")
-    if _con_points_here(ctx):
-        ctx.say(f"Con is still set to use the local server. Restore your earlier Con settings with: "
-                f"{ctx.paths.entry_point} con --revert")
 
     if not yes:
         if not ctx.env.stdin_is_tty():

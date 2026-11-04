@@ -1,4 +1,4 @@
-"""qlm uninstall: remove what qlm install put in place, ask first, and keep logs, backups and (by default) models."""
+"""qlm uninstall: remove what qlm install put in place, ask first, and keep logs, bench results and (by default) models."""
 
 import os
 import shutil
@@ -8,14 +8,10 @@ from tests.fakes import FakeEnv, FakeRunner, fail, make_ctx, ok
 from tests.test_service import RESET, RUNNING, SHOW, STOP, install, unit
 
 RELOAD = ("systemctl", "--user", "daemon-reload")
-CON_LINES = (
-    'con.agent.provider = "openaicompatible"\n'
-    'con.agent.providers.openaicompatible.base_url = "http://127.0.0.1:9931/v1"\n'
-)
 
 
 def full_install(home, repo):
-    """Everything qlm install, fetch, smoke and con leave behind."""
+    """Everything qlm install, fetch, smoke and bench leave behind."""
     p = install(home, repo)
     shutil.rmtree(p.llama_current)
     (p.tag_dir("b11669") / "bin").mkdir(parents=True)
@@ -25,8 +21,8 @@ def full_install(home, repo):
     (p.build_dir("b11669") / "bin").mkdir(parents=True)
     p.local_bin.mkdir(parents=True)
     p.qlm_link.symlink_to(p.entry_point)
-    (p.state_dir / "backups").mkdir(parents=True)
-    (p.state_dir / "backups/con.conf.20261017T120000Z.bak").write_text("old con.conf\n")
+    p.bench.mkdir(parents=True)
+    (p.bench / "bench-20261017T120000Z.json").write_text("{}\n")
     return p
 
 
@@ -57,7 +53,7 @@ def test_a_full_uninstall_removes_the_install_and_keeps_state_and_models(home, r
         assert not os.path.lexists(gone), gone
     assert (p.llama_opt / "notes.txt").read_text() == "mine"
     assert (outside / "llama.cpp").is_dir()
-    assert (p.state_dir / "backups/con.conf.20261017T120000Z.bak").exists()
+    assert (p.bench / "bench-20261017T120000Z.json").exists()
     assert (p.models / "Qwen3.8-27B-UD-Q4_K_M.gguf").exists()
     assert run.ran(*RELOAD)
 
@@ -68,7 +64,7 @@ def test_the_list_names_what_goes_and_what_stays(home, repo):
     text = ctx.out.getvalue()
     remove, keep = text.split("Will keep:", 1)
     assert str(p.unit_file) in remove and str(p.config_dir) in remove and str(p.tag_dir("b11669")) in remove
-    assert str(p.state_dir) in keep and str(p.models) in keep and "con-suggest" in keep and "API key" in keep
+    assert str(p.state_dir) in keep and str(p.models) in keep and str(p.repo) in keep
 
 
 def test_an_empty_build_directory_is_removed_too(home, repo):
@@ -172,26 +168,6 @@ def test_a_failed_daemon_reload_is_only_a_warning(home, repo):
     assert code == 0
     assert "daemon-reload" in ctx.err.getvalue()
     assert not p.config_dir.exists()
-
-
-def test_it_says_how_to_restore_con_and_leaves_con_conf_alone(home, repo):
-    p = full_install(home, repo)
-    p.con_conf.parent.mkdir(parents=True)
-    p.con_conf.write_text(CON_LINES)
-    before = p.con_conf.read_bytes()
-    code, ctx, _ = uninstall(home, repo, "--yes")
-    assert code == 0
-    assert "Con is still set to use the local server" in ctx.out.getvalue()
-    assert f"{p.entry_point} con --revert" in ctx.out.getvalue()
-    assert p.con_conf.read_bytes() == before
-
-
-def test_no_con_note_when_con_uses_another_provider(home, repo):
-    p = full_install(home, repo)
-    p.con_conf.parent.mkdir(parents=True)
-    p.con_conf.write_text('con.agent.provider = "anthropic"\n')
-    code, ctx, _ = uninstall(home, repo, "--yes")
-    assert "Con is still set to use the local server" not in ctx.out.getvalue()
 
 
 def test_a_current_pointing_outside_is_removed_as_a_link_only(home, repo, tmp_path):
