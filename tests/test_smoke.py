@@ -16,8 +16,10 @@ KEY = "k" * 43
 FIXTURES = REPO / "tests/fixtures/server"
 
 
-def fixture(name):
-    return json.loads((FIXTURES / f"{name}.json").read_text())
+def fixture(name, model="qwen3.8-27b"):
+    """A recorded reply; for another model, its id replaces the 27B id the fixtures were recorded with."""
+    data = json.loads((FIXTURES / f"{name}.json").read_text())
+    return json.loads(json.dumps(data).replace('"qwen3.8-27b"', json.dumps(model)))
 
 
 def classify(body):
@@ -34,7 +36,7 @@ def classify(body):
     return "auth"
 
 
-def make_server(**overrides):
+def make_server(model="qwen3.8-27b", **overrides):
     """A FakeServer that passes all eight checks; each keyword replaces one check's reply.
 
     Override keys: health, models, tool_call, tool_loop, messages, thinking, mtp, auth. A value is a
@@ -42,12 +44,12 @@ def make_server(**overrides):
     """
     answers = {
         "health": reply(200, {"status": "ok"}),
-        "models": reply(200, fixture("models")),
-        "tool_call": reply(200, fixture("tool_call")),
-        "tool_loop": reply(200, fixture("tool_loop")),
-        "messages": reply(200, fixture("messages_tool_use")),
-        "thinking": reply(200, fixture("thinking")),
-        "mtp": reply(200, fixture("mtp")),
+        "models": reply(200, fixture("models", model)),
+        "tool_call": reply(200, fixture("tool_call", model)),
+        "tool_loop": reply(200, fixture("tool_loop", model)),
+        "messages": reply(200, fixture("messages_tool_use", model)),
+        "thinking": reply(200, fixture("thinking", model)),
+        "mtp": reply(200, fixture("mtp", model)),
         "auth": reply(401, {"error": {"message": "Invalid API Key", "type": "authentication_error", "code": 401}}),
     }
     for name, value in overrides.items():
@@ -75,8 +77,8 @@ def make_server(**overrides):
     })
 
 
-def run_smoke(home, repo, server, profile="agent"):
-    install(home, repo, profile=profile, key=KEY)
+def run_smoke(home, repo, server, profile="agent", model="qwen3.8-27b"):
+    install(home, repo, profile=profile, key=KEY, model=model)
     ctx = make_ctx(home, repo, runner=FakeRunner(), http=server, clock=FakeClock(advance=True))
     code = cli.main(["smoke"], ctx)
     return code, ctx
@@ -95,6 +97,33 @@ def test_a_healthy_server_passes_all_eight_checks(home, repo):
     assert code == 0
     assert [line.split()[:2] for line in lines(ctx)] == [["PASS", str(n)] for n in range(1, 9)]
     assert "replace any cached prompt in the server's single slot" in ctx.out.getvalue().splitlines()[0]
+
+
+@pytest.mark.parametrize("model", ["qwen3.8-27b", "qwen3.6-35b-a3b"])
+def test_smoke_asks_for_the_model_the_active_profile_serves(home, repo, model):
+    server = make_server(model)
+    code, ctx = run_smoke(home, repo, server, model=model)
+    assert code == 0, ctx.out.getvalue() + ctx.err.getvalue()
+    assert f"{model} listed" in next(line for line in lines(ctx) if line.split()[1] == "2")
+    named = [r["json"]["model"] for r in server.requests if r["json"] and "model" in r["json"]]
+    assert named and set(named) == {model}
+
+
+def test_a_server_serving_another_model_fails_the_models_check(home, repo):
+    code, ctx = run_smoke(home, repo, make_server("qwen3.8-27b"), model="qwen3.6-35b-a3b")
+    assert code == 1
+    assert "qwen3.6-35b-a3b not listed (got qwen3.8-27b)" in next(line for line in lines(ctx) if line.split()[1] == "2")
+
+
+def test_an_active_env_without_an_alias_is_refused(home, repo):
+    p = install(home, repo, key=KEY)
+    p.active_env.write_text("".join(f"{line}\n" for line in p.active_env.read_text().splitlines()
+                                    if not line.startswith("LLAMA_ARG_ALIAS=")))
+    server = make_server()
+    ctx = make_ctx(home, repo, runner=FakeRunner(), http=server, clock=FakeClock(advance=True))
+    assert cli.main(["smoke"], ctx) == 1
+    assert "sets no LLAMA_ARG_ALIAS" in ctx.err.getvalue()
+    assert server.requests == []
 
 
 def test_requests_carry_the_key_the_way_each_api_expects(home, repo):

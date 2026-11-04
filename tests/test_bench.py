@@ -100,9 +100,9 @@ def bench_runner(stream_lines=("4321, 19800", "4321, 20100", "9999, 23000", "432
     return runner(script)
 
 
-def bench_home(home, repo, profile="agent"):
+def bench_home(home, repo, profile="agent", model="qwen3.8-27b"):
     """A home after qlm install and fetch, with current a symlink to the b11669 build."""
-    p = install(home, repo, profile=profile, key=KEY)
+    p = install(home, repo, profile=profile, key=KEY, model=model)
     shutil.rmtree(p.llama_current)
     (p.tag_dir("b11669") / "bin").mkdir(parents=True)
     (p.tag_dir("b11669") / "bin/llama-server").write_bytes(b"server")
@@ -500,16 +500,20 @@ def test_the_result_file_records_the_run(home, repo):
     code, ctx, p = run_bench(home, repo, args=("bench", "--quick"))
     data = json.loads(results(p)[0].read_text())
     assert data["version"] == 1 and data["quick"] is True and data["profile"] == "agent"
+    assert data["model"] == "qwen3.8-27b"
     assert data["llama_tag"] == "b11669" and data["server_build"] == "b11669-620d2225c"
     assert data["ctx_size"] == 65536 and data["vram_gib_budget"] == 20.3
     assert len(data["active_env_sha256"]) == 64
     assert data["measures"]["mtp_on.peak_vram_gib"] == pytest.approx(20100 / 1024, abs=0.05)
 
 
-def write_result(p, name, quick, profile, measures):
+def write_result(p, name, quick, profile, measures, model=None):
     d = p.state_dir / "bench"
     d.mkdir(parents=True, exist_ok=True, mode=0o700)
-    (d / name).write_text(json.dumps({"version": 1, "quick": quick, "profile": profile, "measures": measures}))
+    data = {"version": 1, "quick": quick, "profile": profile, "measures": measures}
+    if model is not None:
+        data["model"] = model
+    (d / name).write_text(json.dumps(data))
 
 
 def test_the_comparison_uses_the_newest_matching_run(home, repo):
@@ -529,6 +533,39 @@ def test_the_comparison_uses_the_newest_matching_run(home, repo):
     assert "+25.0%" in line
     assert any("mtp_on.only_then" in text_line and " - " in text_line for text_line in text.splitlines())
     assert "bench-20261016T140000Z.json" in ctx.err.getvalue()
+
+
+def test_a_35b_run_is_not_compared_with_an_earlier_27b_run(home, repo):
+    p = bench_home(home, repo, model="qwen3.6-35b-a3b")
+    write_result(p, "bench-20261016T100000Z.json", True, "agent", {"mtp_on.pp_2048.tok_s": 1.0}, model="qwen3.8-27b")
+    write_result(p, "bench-20261016T110000Z.json", True, "agent", {"mtp_on.pp_2048.tok_s": 1.0})
+    ctx = make_ctx(home, repo, runner=bench_runner(), http=BenchServer(), clock=FakeClock(advance=True))
+    assert cli.main(["bench", "--quick"], ctx) == 0, out(ctx)
+    assert "nothing to compare with" in ctx.out.getvalue()
+    assert json.loads(results(p)[-1].read_text())["model"] == "qwen3.6-35b-a3b"
+
+
+def test_an_earlier_run_without_a_model_is_compared_with_a_27b_run(home, repo):
+    p = bench_home(home, repo)
+    write_result(p, "bench-20261016T100000Z.json", True, "agent", {"mtp_on.pp_2048.tok_s": 1000.0})
+    write_result(p, "bench-20261016T110000Z.json", True, "agent", {"mtp_on.pp_2048.tok_s": 1.0}, model="qwen3.6-35b-a3b")
+    ctx = make_ctx(home, repo, runner=bench_runner(), http=BenchServer(), clock=FakeClock(advance=True))
+    assert cli.main(["bench", "--quick"], ctx) == 0, out(ctx)
+    assert "bench-20261016T100000Z.json" in ctx.out.getvalue()
+    assert "bench-20261016T110000Z.json" not in ctx.out.getvalue()
+
+
+def test_a_35b_full_run_puts_the_35b_profile_back(home, repo):
+    p = bench_home(home, repo, model="qwen3.6-35b-a3b")
+    original = p.active_env.read_text()
+    run = bench_runner(overrides={SMI_GPU: gpu(24564, 22000), SMI_APPS: apps(("4321", "llama-server", "21000"))})
+    ctx = make_ctx(home, repo, runner=run, http=BenchServer(), clock=FakeClock(advance=True))
+    assert cli.main(["bench"], ctx) == 0, out(ctx)
+    assert original == rendered(home, repo, "agent", "qwen3.6-35b-a3b")
+    assert p.active_env.read_text() == original
+    assert not p.bench_backup.exists()
+    assert len(run.ran(*RESTART)) == 2
+    assert json.loads(results(p)[0].read_text())["model"] == "qwen3.6-35b-a3b"
 
 
 def test_with_no_earlier_run_there_is_nothing_to_compare(home, repo):

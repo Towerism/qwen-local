@@ -451,6 +451,7 @@ def _run(ctx, quick):
         "time": ctx.clock.now().isoformat(),
         "quick": quick,
         "profile": name,
+        "model": profile.settings.get("LLAMA_ARG_ALIAS"),
         "active_env_sha256": hashlib.sha256(original).hexdigest(),
         "llama_tag": os.path.basename(os.readlink(p.llama_current)) if p.llama_current.is_symlink() else None,
         "server_build": client.build,
@@ -546,6 +547,8 @@ def _earlier(ctx, record):
             ctx.warn(f"warning: skipped {path.name}, which isn't a bench result")
             continue
         if data.get("quick") != record["quick"] or data.get("profile") != record["profile"]:
+            continue
+        if data.get("model", "qwen3.8-27b") != record["model"]:  # results from before the model field are 27B's
             continue
         if best is None or key > best[0]:
             best = (key, path, data)
