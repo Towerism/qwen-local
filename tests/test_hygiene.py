@@ -1,8 +1,13 @@
 import ast
+import re
 
 from tests.conftest import REPO
 
 FORBIDDEN = "/" + "home/"
+W = "c" "on"
+PATTERN = re.compile(rf"\b{W}\b|{W}-terminal|{W}\.conf|{W}\.agent|" + "now" "ledge", re.I)
+TRACKED_FILES = ("README.md", "pyproject.toml", ".gitignore")
+TRACKED_DIRS = ("bin", "docs", "profiles", "qlm", "systemd", "tests")
 
 
 def test_no_test_file_or_fixture_contains_a_home_path():
@@ -49,3 +54,30 @@ def test_no_sudo_anywhere_in_the_code():
     hits = [p.name for p in (REPO / "qlm").glob("*.py") if "sudo" in p.read_text()]
     hits += ["bin/qlm"] if "sudo" in (REPO / "bin/qlm").read_text() else []
     assert hits == []
+
+
+def _tracked_text_files():
+    paths = [REPO / name for name in TRACKED_FILES]
+    paths += [p for d in TRACKED_DIRS for p in sorted((REPO / d).rglob("*")) if p.is_file() and "__pycache__" not in p.parts]
+    for path in paths:
+        try:
+            yield path, path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+
+
+def test_no_con_mentions():
+    hits = [
+        f"{path.relative_to(REPO)}:{n}"
+        for path, text in _tracked_text_files()
+        for n, line in enumerate(text.splitlines(), start=1)
+        if PATTERN.search(line)
+    ]
+    assert hits == []
+
+
+def test_con_pattern_self_check():
+    for text in ("C" "on's agent", W + ".conf", "now" "ledge"):
+        assert PATTERN.search(text), text
+    for text in ("config", "context", "second", "icon"):
+        assert not PATTERN.search(text), text
