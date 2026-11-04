@@ -16,7 +16,7 @@ class _Parser(argparse.ArgumentParser):
 
 
 def build_parser():
-    parser = _Parser(prog="qlm", description="Set up and run Qwen3.8-27B with llama-server for Con.")
+    parser = _Parser(prog="qlm", description="Set up and run a local model with llama-server.")
     sub = parser.add_subparsers(dest="command", metavar="<command>", parser_class=_Parser)
     sub.required = True
     sub.add_parser("doctor", help="check this machine before installing (read-only)")
@@ -34,15 +34,6 @@ def build_parser():
     sub.add_parser("stop", help="stop the server")
     sub.add_parser("status", help="show the server's state, profile, VRAM and context use")
     sub.add_parser("smoke", help="run eight API checks against the running server")
-    con = sub.add_parser("con", help="show, write or undo the Con settings for the local server")
-    con_mode = con.add_mutually_exclusive_group(required=True)
-    con_mode.add_argument("--print", dest="mode", action="store_const", const="print", help="show what --apply would do")
-    con_mode.add_argument("--apply", dest="mode", action="store_const", const="apply", help="write the settings")
-    con_mode.add_argument("--revert", dest="mode", action="store_const", const="revert", help="restore the last backup")
-    suggest = sub.add_parser("suggest", help="turn Con's suggestions on (CPU-only Ollama model) or off")
-    suggest_mode = suggest.add_mutually_exclusive_group(required=True)
-    suggest_mode.add_argument("--enable", dest="enable", action="store_true", default=None, help="turn suggestions on")
-    suggest_mode.add_argument("--disable", dest="enable", action="store_false", help="turn suggestions off")
     bench = sub.add_parser("bench", help="measure speed, MTP acceptance, cache reuse and peak VRAM of the running server")
     bench.add_argument("--quick", action="store_true", help="a short run: one prompt size, one generation, no restarts")
     update = sub.add_parser("update", help="build a newer llama.cpp tag, switch to it, and switch back if smoke fails")
@@ -127,15 +118,6 @@ def _dispatch(args, ctx):
             print(f"qlm: no profile named {args.name!r}. Choose one of: {', '.join(names)}.", file=ctx.err)
             return 2
         return service.run(ctx, service.profile_use, name=args.name)
-    if args.command == "con":
-        from qlm import con, service
-
-        command = {"print": con.print_plan, "apply": con.apply, "revert": con.revert}[args.mode]
-        return service.run(ctx, command)
-    if args.command == "suggest":
-        from qlm import con, service
-
-        return service.run(ctx, con.suggest, enable=args.enable)
     if args.command == "bench":
         from qlm import bench
 

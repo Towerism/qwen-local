@@ -73,15 +73,6 @@ def test_the_real_server_starts_passes_smoke_and_stops(repo):
         assert cli.main(["stop"], real_ctx(Path.home(), repo)) == 0
 
 
-def test_con_print_reads_the_real_config_without_showing_keys(repo):
-    ctx = real_ctx(Path.home(), repo)
-    assert cli.main(["con", "--print"], ctx) == 0
-    key = ctx.paths.api_key.read_text().strip() if ctx.paths.api_key.exists() else None
-    assert "con.agent.provider = " in ctx.out.getvalue()
-    if key:
-        assert key not in ctx.out.getvalue()
-
-
 def test_a_quick_bench_measures_the_real_server_and_saves_a_result(repo):
     import json
 

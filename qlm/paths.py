@@ -64,10 +64,6 @@ class Paths:
         return self.state_dir / "logs"
 
     @property
-    def backups(self):
-        return self.state_dir / "backups"
-
-    @property
     def bench(self):
         return self.state_dir / "bench"
 
@@ -78,10 +74,6 @@ class Paths:
     @property
     def qlm_link(self):
         return self.local_bin / "qlm"
-
-    @property
-    def con_conf(self):
-        return self.home / ".config/con/con.conf"
 
     @property
     def profiles_dir(self):

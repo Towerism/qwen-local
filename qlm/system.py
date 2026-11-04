@@ -275,9 +275,6 @@ class Env:
     def cpu_count(self):
         return os.cpu_count() or 1
 
-    def xdg_config_home(self):
-        return os.environ.get("XDG_CONFIG_HOME") or None
-
 
 def parse_ss_listener(stdout, host, port):
     """From `ss -Hltnp` output, the PID of a listener that stops a bind to host:port.

@@ -206,7 +206,6 @@ class FakeEnv:
     tty: bool = False
     token: str = "k" * 43
     cpus: int = 32
-    xdg: object = None
     stdin_tty: bool = False
     answers: list = field(default_factory=list)
     prompts: list = field(default_factory=list)
@@ -217,9 +216,6 @@ class FakeEnv:
     def ask(self, prompt):
         self.prompts.append(prompt)
         return self.answers.pop(0) if self.answers else ""
-
-    def xdg_config_home(self):
-        return self.xdg
 
     def disk_free(self, path):
         return self.disk_free_bytes
