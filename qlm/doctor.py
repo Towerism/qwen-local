@@ -126,7 +126,7 @@ def _git_and_cmake(ctx):
 
 def _missing_model_bytes(ctx):
     missing = 0
-    for f in pins.files():
+    for f in pins.files(pins.model("qwen3.8-27b")):
         final = ctx.paths.models / f.local_name
         part = ctx.paths.models / (f.local_name + ".part")
         if final.exists() and final.stat().st_size == f.size:

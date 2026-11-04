@@ -17,13 +17,13 @@
 
 ## Pinned files
 
-All three files come from `unsloth/Qwen3.8-27B-GGUF` at revision `4ca720788d1e01f1bff70c033e0d0028fd02e502` (last modified 2026-08-20). `qlm fetch` downloads from `https://huggingface.co/unsloth/Qwen3.8-27B-GGUF/resolve/<revision>/<path>` and checks these hashes. Publishers re-upload quants under the same name, which could change the sizes this budget depends on, or the chat template that runs under `--jinja`. Changing a pin needs an update to this ADR.
+All three files come from one Hugging Face repo at one revision (last modified 2026-08-20). `qlm fetch` downloads each from `https://huggingface.co/<repo>/resolve/<revision>/<path>` and checks these hashes. Publishers re-upload quants under the same name, which could change the sizes this budget depends on, or the chat template that runs under `--jinja`. Changing a pin needs an update to this ADR.
 
-| Path | Bytes | SHA-256 |
-|---|---|---|
-| `Qwen3.8-27B-UD-Q4_K_M.gguf` | 16,464,440,224 | `322e194ff79741c7baa497c240f677f54b201b0efab44ca8e50f122b39123482` |
-| `MTP/mtp-Qwen3.8-27B-Q4_0.gguf` | 1,369,590,656 | `50d9ce5a6da381bbcfb31061cf73df94a90e6faf8efeddee379a9cb8f1501c6e` |
-| `mmproj-BF16.gguf` (vision profile only) | 931,146,432 | `83ee4f4f205fa514161778c41df1ea14144faa0f713510893b63c2395f5c2d53` |
+| Repo | Revision | Path | Bytes | SHA-256 |
+|---|---|---|---|---|
+| `unsloth/Qwen3.8-27B-GGUF` | `4ca720788d1e01f1bff70c033e0d0028fd02e502` | `Qwen3.8-27B-UD-Q4_K_M.gguf` | 16,464,440,224 | `322e194ff79741c7baa497c240f677f54b201b0efab44ca8e50f122b39123482` |
+| `unsloth/Qwen3.8-27B-GGUF` | `4ca720788d1e01f1bff70c033e0d0028fd02e502` | `MTP/mtp-Qwen3.8-27B-Q4_0.gguf` | 1,369,590,656 | `50d9ce5a6da381bbcfb31061cf73df94a90e6faf8efeddee379a9cb8f1501c6e` |
+| `unsloth/Qwen3.8-27B-GGUF` | `4ca720788d1e01f1bff70c033e0d0028fd02e502` | `mmproj-BF16.gguf` (vision profile only) | 931,146,432 | `83ee4f4f205fa514161778c41df1ea14144faa0f713510893b63c2395f5c2d53` |
 
 ## Context
 

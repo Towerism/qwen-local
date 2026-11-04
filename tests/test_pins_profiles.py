@@ -5,22 +5,66 @@ import pytest
 from qlm import pins, profiles
 
 
-def test_pins_match_the_values_written_in_the_adrs(repo):
-    adr1 = (repo / "docs/adr/0001-runtime-llama-cpp-server.md").read_text()
-    adr2 = (repo / "docs/adr/0002-model-file-and-vram-budget.md").read_text()
+ADRS = {
+    "qwen3.8-27b": "docs/adr/0002-model-file-and-vram-budget.md",
+    "qwen3.6-35b-a3b": "docs/adr/0005-qwen3.6-35b-a3b-model-files-and-vram-budget.md",
+}
+PIN_ROW = re.compile(
+    r"^\| `([^`]+)` \| `([0-9a-f]{40})` \| `([^`]+)`(?: \([^)]*\))? \| ([\d,]+) \| `([0-9a-f]{64})` \|$", re.M
+)
 
+
+def test_llama_cpp_pin_matches_adr_0001(repo):
+    adr1 = (repo / "docs/adr/0001-runtime-llama-cpp-server.md").read_text()
     assert f"tag `{pins.LLAMA_TAG}`, commit `{pins.LLAMA_COMMIT}`" in adr1
-    assert f"`{pins.HF_REPO}` at revision `{pins.HF_REVISION}`" in adr2
-    rows = {
-        m.group(1): (int(m.group(2).replace(",", "")), m.group(3))
-        for m in re.finditer(r"^\| `([^`]+)`(?: \([^)]*\))? \| ([\d,]+) \| `([0-9a-f]{64})` \|$", adr2, re.M)
-    }
-    assert {f.repo_path: (f.size, f.sha256) for f in pins.FILES} == rows
+
+
+@pytest.mark.parametrize("model_id", sorted(ADRS))
+def test_pins_match_the_model_adrs(repo, model_id):
+    adr = (repo / ADRS[model_id]).read_text()
+    rows = {(m[1], m[2], m[3], int(m[4].replace(",", "")), m[5]) for m in PIN_ROW.finditer(adr)}
+    expected = {(f.repo, f.revision, f.repo_path, f.size, f.sha256) for f in pins.model(model_id).files}
+    assert rows == expected
+
+
+def test_every_model_has_an_adr_and_a_unique_id():
+    ids = [m.id for m in pins.MODELS]
+    assert sorted(ids) == sorted(ADRS)
+    assert len(set(ids)) == len(ids)
+    assert pins.DEFAULT_MODEL in ids
+
+
+def test_every_model_has_exactly_one_main_file_and_distinct_local_names():
+    for m in pins.MODELS:
+        assert [f.role for f in m.files].count("main") == 1, m.id
+        assert {f.role for f in m.files} <= {"main", "mtp", "mmproj"}, m.id
+    names = [f.local_name for m in pins.MODELS for f in m.files]
+    assert len(set(names)) == len(names)
+
+
+def test_the_35b_draft_comes_from_its_own_repo_and_revision():
+    main, mtp = pins.files(pins.model("qwen3.6-35b-a3b"))
+    assert pins.download_url(main) == (
+        "https://huggingface.co/mradermacher/Qwen3.6-35B-A3B-GGUF/resolve/"
+        "ac96549d2e8b902f1a772083a33d13b5ee01fe3c/Qwen3.6-35B-A3B.Q4_K_M.gguf"
+    )
+    assert pins.download_url(mtp).startswith(
+        "https://huggingface.co/ggml-org/Qwen3.6-35B-A3B-GGUF/resolve/7878dc9a905c7c9379e5e8d6a1aa9affdd6839c5/"
+    )
+
+
+def test_an_unknown_model_id_names_the_valid_ones():
+    with pytest.raises(pins.UnknownModel, match="qwen3.6-35b-a3b, qwen3.8-27b"):
+        pins.model("bogus")
 
 
 def test_only_the_projector_is_vision_only():
-    assert [f.local_name for f in pins.files()] == ["Qwen3.8-27B-UD-Q4_K_M.gguf", "mtp-Qwen3.8-27B-Q4_0.gguf"]
-    assert len(pins.files(vision=True)) == 3
+    qwen27 = pins.model("qwen3.8-27b")
+    assert [f.local_name for f in pins.files(qwen27)] == ["Qwen3.8-27B-UD-Q4_K_M.gguf", "mtp-Qwen3.8-27B-Q4_0.gguf"]
+    assert [f.role for f in pins.files(qwen27, vision=True)] == ["main", "mtp", "mmproj"]
+    qwen35 = pins.model("qwen3.6-35b-a3b")
+    assert pins.files(qwen35, vision=True) == pins.files(qwen35)
+    assert [f.role for f in pins.files(qwen35)] == ["main", "mtp"]
 
 
 @pytest.mark.parametrize("name, vram", [("agent", 20.3), ("long", 20.0), ("vision", 18.7)])

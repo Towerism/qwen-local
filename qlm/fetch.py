@@ -50,7 +50,7 @@ def run(ctx, vision=False):
 def _run(ctx, vision):
     models = ctx.paths.models
     models.mkdir(parents=True, exist_ok=True)
-    wanted = pins.files(vision)
+    wanted = pins.files(pins.model("qwen3.8-27b"), vision)
     failed, pending = [], []
 
     for f in wanted:

@@ -34,12 +34,12 @@ def test_doctor_reports_all_eleven_checks_on_this_machine(repo):
 
 def test_fetch_verifies_the_files_already_on_disk_without_downloading(repo, tmp_path):
     real_models = Path.home() / ".local/share/qlm/models"
-    if not all((real_models / f.local_name).exists() for f in pins.files()):
+    if not all((real_models / f.local_name).exists() for f in pins.files(pins.model("qwen3.8-27b"))):
         pytest.skip("model files not downloaded on this machine")
     home = tmp_path / "home"
     models = home / ".local/share/qlm/models"
     models.mkdir(parents=True)
-    for f in pins.files():
+    for f in pins.files(pins.model("qwen3.8-27b")):
         (models / f.local_name).symlink_to(real_models / f.local_name)
 
     class NoHttp:

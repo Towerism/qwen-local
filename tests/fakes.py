@@ -4,7 +4,7 @@ import datetime
 import hashlib
 import io
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from qlm import pins
 from qlm.paths import Paths
@@ -251,22 +251,22 @@ def make_ctx(home, repo, runner=None, http=None, clock=None, env=None):
     )
 
 
-def small_pins(monkeypatch):
-    """Replace the real pinned files with small byte strings and their real hashes."""
+def small_pins(monkeypatch, model_id="qwen3.8-27b"):
+    """Replace every model's pinned files with small byte strings and their real hashes.
+
+    Returns the files of `model_id`, and the contents and download URLs of every model's files.
+    """
     contents = {}
-    files = []
-    for f in pins.FILES:
-        data = (f.local_name.encode() * 400)[: 3000 + len(files) * 500]
-        contents[f.local_name] = data
-        files.append(
-            pins.PinnedFile(
-                repo_path=f.repo_path,
-                local_name=f.local_name,
-                size=len(data),
-                sha256=hashlib.sha256(data).hexdigest(),
-                vision_only=f.vision_only,
-            )
-        )
-    monkeypatch.setattr(pins, "FILES", tuple(files))
-    urls = {pins.download_url(f): contents[f.local_name] for f in files}
-    return files, contents, urls
+    models = []
+    n = 0
+    for m in pins.MODELS:
+        files = []
+        for f in m.files:
+            data = (f.local_name.encode() * 400)[: 3000 + n * 500]
+            n += 1
+            contents[f.local_name] = data
+            files.append(replace(f, size=len(data), sha256=hashlib.sha256(data).hexdigest()))
+        models.append(replace(m, files=tuple(files)))
+    monkeypatch.setattr(pins, "MODELS", tuple(models))
+    urls = {pins.download_url(f): contents[f.local_name] for m in models for f in m.files}
+    return list(pins.model(model_id).files), contents, urls
