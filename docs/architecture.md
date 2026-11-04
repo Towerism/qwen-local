@@ -1,6 +1,6 @@
 # qlm: architecture
 
-`qlm` is a command-line tool that installs, runs, checks and tunes Qwen3.8-27B (Q4_K_M) on this one machine, as a local OpenAI-compatible server for coding agents. This document says what the tool is made of and how the parts fit. Use it to review the design before any code is written, and to settle questions later. The reasons behind each choice are in the ADRs it links to.
+`qlm` is a command-line tool that installs llama.cpp and runs, checks and tunes one model from its catalog on this one machine, as a local OpenAI-compatible server for coding agents. The catalog holds Qwen3.6-35B-A3B (the default) and Qwen3.8-27B. This document says what the tool is made of and how the parts fit. Use it to review the design before any code is written, and to settle questions later. The reasons behind each choice are in the ADRs it links to.
 
 - **Status:** Accepted (2026-10-16)
 - **Date:** 2026-10-16
@@ -11,11 +11,12 @@
 | Piece | Choice | Why |
 |---|---|---|
 | Runtime | llama.cpp `llama-server`, built from tag `b11669` (2026-10-15) with CUDA for sm_89 | [ADR 0001](adr/0001-runtime-llama-cpp-server.md) |
-| Model | `unsloth/Qwen3.8-27B-GGUF` `UD-Q4_K_M`, plus its MTP draft file | [ADR 0002](adr/0002-model-file-and-vram-budget.md) |
-| Default settings | 64k context, 8-bit key/value (KV) cache, all layers on GPU, multi-token prediction (MTP) on, one slot, no vision projector | [ADR 0002](adr/0002-model-file-and-vram-budget.md) |
+| Models | Qwen3.6-35B-A3B: `mradermacher/Qwen3.6-35B-A3B-GGUF` `Q4_K_M`, plus the MTP draft file from `ggml-org/Qwen3.6-35B-A3B-GGUF` | [ADR 0005](adr/0005-qwen3.6-35b-a3b-model-files-and-vram-budget.md) |
+| | Qwen3.8-27B: `unsloth/Qwen3.8-27B-GGUF` `UD-Q4_K_M`, plus its MTP draft file and, for vision, its projector | [ADR 0002](adr/0002-model-file-and-vram-budget.md) |
+| Default settings | `agent` profile: 8-bit key/value (KV) cache, multi-token prediction (MTP) on, one slot, no vision projector; the context per model (48k for 35B, 64k for 27B) | [ADR 0005](adr/0005-qwen3.6-35b-a3b-model-files-and-vram-budget.md), [ADR 0002](adr/0002-model-file-and-vram-budget.md) |
 | Tooling | One Python stdlib CLI, pytest, systemd user service | [ADR 0004](adr/0004-python-stdlib-cli-and-systemd-user-unit.md) |
 
-The first full `qlm bench` on this machine (2026-10-18, `agent` profile, llama.cpp `b11669`) measured these, next to the estimates the design started from. Speeds are medians of 3 runs.
+The first full `qlm bench` on this machine (2026-10-18, Qwen3.8-27B, `agent` profile, llama.cpp `b11669`) measured these, next to the estimates the design started from. Speeds are medians of 3 runs.
 
 | Measure | Estimate | Measured | Source of the estimate |
 |---|---|---|---|
@@ -26,6 +27,8 @@ The first full `qlm bench` on this machine (2026-10-18, `agent` profile, llama.c
 | Prompt processing | 1,500–2,500 tok/s | 2,171–2,474 tok/s from 2k to 48k tokens; 2,524–2,899 tok/s with MTP off | Estimate for a dense 27B model on a 4090 |
 | First agent turn | 6–9 s before output starts | About 5.5 s, worked out from the measured rate | ~13k-token fixed prompt at the rate above |
 | Later agent turns | Only the new tokens are re-read | 1,053–1,054 tokens re-read per turn after a 13k prefix, with MTP on and off | ADR 0001, context checkpoints |
+
+The Qwen3.6-35B-A3B readings, and the search that chose its context and expert placement, are in [ADR 0005](adr/0005-qwen3.6-35b-a3b-model-files-and-vram-budget.md).
 
 ## How the parts connect
 
@@ -41,6 +44,19 @@ flowchart LR
     srv --> ram[(System RAM<br/>checkpoints + prompt cache)]
 ```
 
+## Models and selection
+
+The catalog is `MODELS` in `qlm/pins.py`. Each model has an id, which is also the `LLAMA_ARG_ALIAS` that clients ask for, and its files. Each file carries its own Hugging Face repo, revision, path, size and SHA-256, because one model's files can come from different repos. A test compares every pin with the table in the model's ADR (0002 for 27B, 0005 for 35B). Each model's profiles live in `profiles/<model id>/<name>.env`.
+
+The unit reads only `active.env`. The selection decides which model's profiles qlm renders into it, so a model can be selected, and its files fetched, while the server keeps running the previous one.
+
+- **The selected model** is the id in `~/.config/qlm/model`. Without that file, it is the alias in `active.env` when that is a catalog id, so an install from before selection keeps the model it runs. Otherwise it is `qwen3.6-35b-a3b`. A file naming an unknown id stops every command that needs the selection, with `qlm use <model>` as the fix.
+- **`active.env` belongs to** the model whose id is its `LLAMA_ARG_ALIAS`. It is **stock** when it equals the rendering of one of that model's profiles, and **custom** otherwise. `qlm status` shows `custom` as the profile name for a custom one.
+- **`qlm use <model>`** keeps the current profile name if the new model has it, else uses `agent`. It writes the selection only after the profile is in place, so a VRAM refusal or a failed restart leaves the old selection. The exception is a model whose files are missing: then it writes only the selection, so `qlm fetch` knows what to fetch, and exits 1. Selecting a model that is already selected, with its profile in `active.env`, changes nothing. Replacing a custom `active.env` is reported.
+- **Plain `qlm start`** starts `active.env` as it is when it belongs to the selected model. When it is missing or stock for another model, `qlm start` first renders the selected model's profile of the same name (or `agent`), restarting the server if it runs. A custom `active.env` of another model is never overwritten: `qlm start` stops and names `qlm start agent` and `qlm use <its model>` as the ways out.
+- **`qlm install`** writes the selection and the `agent` profile only when `active.env` is missing. It never overwrites either file.
+- **`qlm fetch --from`** links a local copy only when it matches a pinned file of the selected model, and writes nothing if any given file doesn't match. qlm never follows a link to delete: `qlm uninstall --models` removes the link and leaves the copy.
+
 ## Where things live
 
 | Path | Contents | Written by |
@@ -50,8 +66,9 @@ flowchart LR
 | `~/.cache/qlm/llama.cpp/` | llama.cpp git checkout | `qlm install` |
 | `~/.local/opt/llama.cpp/<tag>/` | Built `llama-server` and `llama-bench`, one directory per tag | `qlm install`, `qlm update` |
 | `~/.local/opt/llama.cpp/current` | Symlink to the active tag | Switched only after a check passes |
-| `~/.local/share/qlm/models/` | The two GGUF files and `SHA256SUMS` | `qlm fetch` |
-| `~/.config/qlm/active.env` | The active profile as `LLAMA_ARG_*` variables. `qlm install` writes the `agent` profile here, so it always exists. | `qlm install`, `qlm profile use`, `qlm bench` (temporarily) |
+| `~/.local/share/qlm/models/` | The pinned files of every fetched model, each a downloaded file or a symlink to a local copy, and `SHA256SUMS` | `qlm fetch` |
+| `~/.config/qlm/model` | The selected model id, one line | `qlm use`, `qlm install` (only when `active.env` is missing) |
+| `~/.config/qlm/active.env` | The active profile as `LLAMA_ARG_*` variables; the only file the unit reads. `qlm install` writes the selected model's `agent` profile here when it is missing. | `qlm install`, `qlm use`, `qlm profile use`, `qlm start`, `qlm bench` (temporarily) |
 | `~/.config/qlm/active.env.bench-backup` | The profile as it was before `qlm bench` switched MTP off. It exists only during a full bench; if it is left behind, `qlm bench` and `qlm update` refuse and give the command to put it back. | `qlm bench` |
 | `~/.config/systemd/user/qlm-server.service` | Service unit | `qlm install` |
 | `~/.local/state/qlm/` | `bench/` holding one JSON file per `qlm bench` run, `smoke/` holding one log per `qlm smoke` run, and `logs/` holding the `install-<stamp>.log` and `update-<stamp>.log` build logs. The folders are mode 0700 and their files 0600. | `qlm bench`, `qlm smoke`, `qlm install`, `qlm update` |
@@ -63,19 +80,20 @@ Each command does one job and exits non-zero on failure with a message that name
 | Command | What it does | Done when |
 |---|---|---|
 | `qlm doctor` | Read-only preflight: driver and `nvidia-smi`, `nvcc` and host compiler, disk space, port 9931 free, models loaded in Ollama, VRAM held by other processes, `~/.local/bin` on `PATH` | Prints a pass/fail line per check |
-| `qlm install [--tag b11669] [--rebuild]` | Resolve the tag to its commit and stop unless it matches ADR 0001, then check out that commit, build with `-DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=89 -DBUILD_SHARED_LIBS=OFF`, and retry the configure step with `-DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-15` if `nvcc` rejects the host compiler. Copy the new binaries in under staged names; they replace the old ones only after the `--help` check passes. Then point `current` at the pinned tag, but only when `current` is missing or its build is gone, so a later `qlm install` never undoes a `qlm update`. Install the unit and symlink, write the `agent` profile to `active.env`, and create the API key file. An installed tag skips the build unless `--rebuild` is given. `--tag` accepts only the pinned tag; for any other, it says to use `qlm update`. | `llama-server --help` lists every variable the profiles use as `(env: NAME)`, and `draft-mtp` among the `--spec-type` values |
-| `qlm fetch [--vision]` | Download the model and MTP files with resume from the pinned Hugging Face revision (`/resolve/<revision>/`), then check SHA-256 against the hashes recorded in ADR 0002, not hashes fetched at download time. `--vision` adds `mmproj-BF16.gguf`. After a run in which every file verified, write `SHA256SUMS`. | All hashes match the recorded ones |
-| `qlm profile use <agent\|long\|vision>` | Render `active.env` from `profiles/<name>.env`, after checking that the model files it names exist. If the service is running, first run the Ollama and VRAM checks from `qlm start`, counting the running server's own VRAM as free, then restart it and wait and report as `qlm start` does | `active.env` matches the profile |
-| `qlm start` | Check free VRAM (total minus used, from `nvidia-smi --query-gpu=memory.total,memory.used`) against the profile's `vram_gib` plus 0.5 GiB. Refuse if `ollama ps` shows a model using the GPU, and print the `ollama stop <name>` command. A CPU-only model is allowed. Then clear any earlier start limit with `systemctl --user reset-failed`, start the service, wait for `/health` to return 200 (up to 180 s), and stop the unit if the wait runs out or the server exits, so it doesn't keep retrying | Reports the server's VRAM and load time |
-| `qlm stop`, `qlm status`, `qlm logs [-n N] [-f]` | Wrap `systemctl --user` and `journalctl --user`. `status` adds VRAM, the profile, uptime, and the largest request so far (`llamacpp:n_tokens_max` from `/metrics`) against the context size. The pinned llama-server has no metric for the context in use right now, and `/slots`, which has it, stays off. | |
+| `qlm install [--tag b11669] [--rebuild]` | Resolve the tag to its commit and stop unless it matches ADR 0001, then check out that commit, build with `-DGGML_CUDA=ON -DCMAKE_CUDA_ARCHITECTURES=89 -DBUILD_SHARED_LIBS=OFF`, and retry the configure step with `-DCMAKE_CUDA_HOST_COMPILER=/usr/bin/g++-15` if `nvcc` rejects the host compiler. Copy the new binaries in under staged names; they replace the old ones only after the `--help` check passes. Then point `current` at the pinned tag, but only when `current` is missing or its build is gone, so a later `qlm install` never undoes a `qlm update`. Install the unit and symlink, write the selected model's `agent` profile to `active.env` if it is missing, and create the API key file. An installed tag skips the build unless `--rebuild` is given. `--tag` accepts only the pinned tag; for any other, it says to use `qlm update`. | `llama-server --help` lists every variable the profiles use as `(env: NAME)`, and `draft-mtp` among the `--spec-type` values |
+| `qlm fetch [--vision] [--from PATH]` | For the selected model, download the main and MTP files with resume, each from its pinned Hugging Face repo and revision (`/resolve/<revision>/`), then check SHA-256 against the hashes recorded in the model's ADR, not hashes fetched at download time. `--vision` adds the vision projector, and exits 2 for a model without one. `--from PATH` (repeatable) links a local copy instead of downloading it, once its size and SHA-256 match a pin. After a run in which every file verified, write `SHA256SUMS` listing every catalog file present, so fetching one model keeps the other's lines. | All hashes match the recorded ones |
+| `qlm use <model>` | Select a catalog model, render its profile into `active.env` and restart a running server, as described under [Models and selection](#models-and-selection). An unknown id exits 2 and lists the valid ones. | `qlm status` shows the model |
+| `qlm profile use <name>` | Render `active.env` from the selected model's `profiles/<model id>/<name>.env`, after checking that the model files it names exist. If the service is running, first run the Ollama and VRAM checks from `qlm start`, counting the running server's own VRAM as free, then restart it and wait and report as `qlm start` does | `active.env` matches the profile. A name only the other model has exits 2 with `the <name> profile is not available for <model id>` |
+| `qlm start [name]` | With a name, switch to that profile first, as `qlm profile use` does. Without one, follow the selection as described under [Models and selection](#models-and-selection). Check free VRAM (total minus used, from `nvidia-smi --query-gpu=memory.total,memory.used`) against the profile's `vram_gib` plus 0.5 GiB. Refuse if `ollama ps` shows a model using the GPU, and print the `ollama stop <name>` command. A CPU-only model is allowed. Then clear any earlier start limit with `systemctl --user reset-failed`, start the service, wait for `/health` to return 200 (up to 180 s), and stop the unit if the wait runs out or the server exits, so it doesn't keep retrying | Reports the server's VRAM and load time |
+| `qlm stop`, `qlm status`, `qlm logs [-n N] [-f]` | Wrap `systemctl --user` and `journalctl --user`. `status` adds the model `active.env` runs (`model:`, and `selected:` when the selection differs), VRAM, the profile, uptime, and the largest request so far (`llamacpp:n_tokens_max` from `/metrics`) against the context size. The pinned llama-server has no metric for the context in use right now, and `/slots`, which has it, stays off. | |
 | `qlm smoke` | Eight API checks, listed below | All pass, or each failure is named |
-| `qlm bench [--quick]` | Measure the running server: prompt and generation speed, MTP acceptance, cache reuse and peak VRAM, with MTP on and off. It needs a ready server and never starts one. `--quick` takes one short measurement of each kind without restarting. Slow numbers never fail it; only a measurement that can't be taken does. | Results saved as `bench-<stamp>.json` under `~/.local/state/qlm/bench/`, and compared with the newest earlier run of the same kind and profile |
+| `qlm bench [--quick]` | Measure the running server: prompt and generation speed, MTP acceptance, cache reuse and peak VRAM, with MTP on and off. It needs a ready server and never starts one. `--quick` takes one short measurement of each kind without restarting. Slow numbers never fail it; only a measurement that can't be taken does. | Results saved as `bench-<stamp>.json` under `~/.local/state/qlm/bench/`, and compared with the newest earlier run of the same kind, model and profile. Each result records its `model`; results from before that field count as Qwen3.8-27B's |
 | `qlm update --tag <bN> --commit <sha>` | In this order: build the new tag beside the old one, check its commit and its `--help`, check free VRAM as `qlm start` does, switch `current` to it, restart, run `qlm smoke`. If smoke fails, switch `current` back and restart. If the service was stopped beforehand, it is stopped again at the end. Nothing is switched if the build, the checks or `qlm start`'s preflight fail. Ctrl-C or SIGTERM after the switch rolls back too. `qlm install` won't undo an update. The pin in ADR 0001 and `qlm/pins.py` moves only by hand. `--commit` is what makes the build trustworthy, so copy it from the tag's page on GitHub. | Smoke passes on the new tag, or the old tag is back in `current` |
-| `qlm uninstall [--models] [--yes]` | List what it removes and keeps, then ask for `yes` (`--yes` skips the question; without a terminal it is required). Stop the server, then remove the unit, `current` and the `b<digits>` builds, `~/.cache/qlm/`, the `qlm` link if it points at this repo, and `~/.config/qlm/`. `--models` also removes the model files. It keeps `~/.local/state/qlm/`, which holds the bench results and logs. Links are removed as links. | Everything listed is gone, or the failure lists what was removed and what remains |
+| `qlm uninstall [--models] [--yes]` | List what it removes and keeps, then ask for `yes` (`--yes` skips the question; without a terminal it is required). Stop the server, then remove the unit, `current` and the `b<digits>` builds, `~/.cache/qlm/`, the `qlm` link if it points at this repo, and `~/.config/qlm/`. `--models` also removes the model files, and only the link for a file linked with `fetch --from`. It keeps `~/.local/state/qlm/`, which holds the bench results and logs. Links are removed as links. | Everything listed is gone, or the failure lists what was removed and what remains |
 
 ### The `agent` profile
 
-This is the default profile, as `profiles/agent.env`. llama-server reads each `LLAMA_ARG_*` variable as the matching command-line flag. `qlm install` checks every name against the built binary's `--help`, because names have changed between releases: in 2026 the MTP value of `--spec-type` changed from `mtp` to `draft-mtp`. The first line is a comment `qlm` reads for the VRAM preflight; llama-server ignores it.
+Each model's `agent` profile is its default. This one is Qwen3.8-27B's, `profiles/qwen3.8-27b/agent.env`. llama-server reads each `LLAMA_ARG_*` variable as the matching command-line flag. `qlm install` checks every name against the built binary's `--help`, because names have changed between releases: in 2026 the MTP value of `--spec-type` changed from `mtp` to `draft-mtp`. The first line is a comment `qlm` reads for the VRAM preflight; llama-server ignores it.
 
 ```ini
 # qlm: vram_gib=20.3
@@ -117,7 +135,9 @@ The sampling values are Qwen's published settings for thinking mode. llama-serve
 - Context shift is off by default in llama-server, and the profile leaves it off. A request over the context limit fails instead of losing its start.
 - The last four lines lock the server down for a desktop that also runs a browser. By default llama-server reflects any web page's `Origin` back with credentials allowed, so a page could drive the model and read the replies. `http://qlm.invalid` matches no real site. The API key, which no web page knows, also stops the plain POSTs a page can send without a CORS check, which would otherwise evict the server's cached prompt. The web UI and `/slots` are off because nothing here uses them. `/health` stays public without the key.
 
-The `long` profile (`vram_gib=20.0`) sets the context to 98,304 and removes the three `SPEC_*` lines. The `vision` profile (`vram_gib=18.7`) sets the context to 32,768, removes `SPEC_*` and the `LLAMA_ARG_MMPROJ_AUTO=false` line, and sets `LLAMA_ARG_MMPROJ` to the projector file.
+Qwen3.8-27B's `long` profile (`vram_gib=20.0`) sets the context to 98,304 and removes the three `SPEC_*` lines. Its `vision` profile (`vram_gib=18.7`) sets the context to 32,768, removes `SPEC_*` and the `LLAMA_ARG_MMPROJ_AUTO=false` line, and sets `LLAMA_ARG_MMPROJ` to the projector file.
+
+Qwen3.6-35B-A3B's `agent` profile (`vram_gib=21.8`) differs from the one above only in its two file names, its alias and a context of 49,152. Its `long` profile (`vram_gib=21.7`) sets the context to 262,144, removes `SPEC_*` and adds `LLAMA_ARG_N_CPU_MOE=4`, which keeps the experts of 4 layers in system RAM. It has no `vision` profile. [ADR 0005](adr/0005-qwen3.6-35b-a3b-model-files-and-vram-budget.md) has the measurements behind these values.
 
 ### The service unit
 
@@ -125,7 +145,7 @@ The `long` profile (`vram_gib=20.0`) sets the context to 98,304 and removes the 
 
 ```ini
 [Unit]
-Description=llama-server for Qwen3.8-27B (qlm)
+Description=llama-server for the selected qlm model
 StartLimitIntervalSec=120
 StartLimitBurst=3
 
@@ -139,14 +159,14 @@ RestartSec=5
 WantedBy=default.target
 ```
 
-The start limit stops systemd after three failed starts in two minutes. Without it, a profile that doesn't fit would restart every 5 s indefinitely, because systemd's default limit (5 starts in 10 s) is never reached at that delay. The unit is not enabled at login. `qlm start` starts it when you want the model, so the 20 GiB of VRAM stays free otherwise.
+The start limit stops systemd after three failed starts in two minutes. Without it, a profile that doesn't fit would restart every 5 s indefinitely, because systemd's default limit (5 starts in 10 s) is never reached at that delay. The unit is not enabled at login. `qlm start` starts it when you want the model, so its VRAM stays free otherwise. `qlm install` rewrites the unit each time it runs, so an install from before model selection shows the old Description until `qlm install` runs again; nothing else in the unit changed.
 
 `bin/qlm` resolves its own real path (it is reached through a symlink), adds the repo root to `sys.path`, and calls `qlm.cli.main()`. That works under `python3 -I`, which ignores `PYTHONPATH` and the current directory.
 
 ### What `qlm smoke` checks
 
 1. `GET /health` returns 200.
-2. `GET /v1/models` lists `qwen3.8-27b`.
+2. `GET /v1/models` lists the model id, the `LLAMA_ARG_ALIAS` of `active.env`.
 3. A one-tool request returns a `tool_calls` entry naming that tool, with arguments that parse as JSON and match the schema.
 4. A two-step loop works: the tool result goes back to the model, and the final answer uses a value only that result contained.
 5. The Anthropic endpoint `/v1/messages` returns a `tool_use` block for the same tool.
@@ -172,27 +192,32 @@ With MTP on, a full run measures, then checks VRAM, saves `active.env` to `activ
 
 | Failure | Detection | Result |
 |---|---|---|
-| Not enough free VRAM (browser grew, Ollama loaded a model) | `qlm start` preflight | Refuses to start and lists the processes and how much each holds |
+| Not enough free VRAM (browser grew, Ollama loaded a model) | `qlm start` preflight | Refuses to start and lists the processes and how much each holds. The 35B profiles leave only about 1.7 GiB for the desktop ([ADR 0005](adr/0005-qwen3.6-35b-a3b-model-files-and-vram-budget.md)) |
 | Profile doesn't fit after all | `--fit off` makes llama-server exit on allocation failure | Service fails; `qlm start` prints the last journal lines and suggests closing apps that hold VRAM, or lowering `LLAMA_ARG_CTX_SIZE` in the profile |
-| Request exceeds 64k tokens | llama-server returns an error | The client gets the error; nothing is silently truncated |
+| Request exceeds the profile's context | llama-server returns an error | The client gets the error; nothing is silently truncated |
 | Profile keeps failing at start | systemd start limit (3 in 120 s); `qlm start` timeout | Unit stays failed instead of looping; `qlm start` shows the journal |
 | Bad build or renamed flag after `qlm update` | `--help` check, then smoke | `current` stays on, or returns to, the previous tag |
 | Corrupt or partial download | SHA-256 check | `qlm fetch` resumes, then re-checks |
+| Local copy that doesn't match a pin of the selected model | `qlm fetch --from` checks size and SHA-256 | Refused, with nothing linked or downloaded |
+| Selected model's files missing | `qlm use`, `qlm start`, `qlm profile use` | Names the missing files and says to run `qlm fetch` |
 
 ## How the code is tested
 
 - **Unit tests (pytest, default run).** `subprocess` calls, HTTP and the clock are passed in as parameters, so tests use fakes. Fixtures hold outputs in the shape captured from this machine: `nvidia-smi` queries, `ollama ps`, a `llama-server --help` from the pinned tag, and recorded `/v1/chat/completions` responses. The repo is public, so fixtures are scrubbed before commit: no usernames, home paths, process lists or real prompt text. A test fails if any fixture contains `/home/`. Test cases cover profile rendering, the VRAM preflight maths, the checksum and resume logic, and update rollback.
-- **Machine tests (`pytest -m machine`, opt-in).** These run the real tools on this machine: `qlm doctor`, verifying the model files, and starting the real server to run `qlm status` and `qlm smoke` before stopping it again. `qlm bench --quick` runs the same way, and leaves a result file behind.
+- **Machine tests (`pytest -m machine`, opt-in).** These run the real tools on this machine: `qlm doctor`, verifying the model files, and starting the real server to run `qlm status` and `qlm smoke` before stopping it again. One test runs `qlm smoke` for 35B `agent`, 35B `long` and 27B `agent` in turn; it fails if the server is already running, and puts the selection and `active.env` back when it ends. `qlm bench --quick` runs the same way, and leaves a result file behind.
 - The test plan is written per feature during the spec step (`senior-qa`), before the tests.
 
 ## Not in scope
 
 - Running more than one model at a time, or serving other machines. The server binds to 127.0.0.1 only and needs the API key.
-- Fine-tuning, or quantizing the model ourselves.
+- Models outside the catalog, or local files that don't match a pinned hash.
+- Fine-tuning, or quantizing a model ourselves.
 
 ## Decisions from review
 
 The user settled these on 2026-10-16:
 
-1. **Model file:** Unsloth's `UD-Q4_K_M` (15.33 GiB), not llama.cpp's reference `Q4_K_M` (17.67 GiB). The reference file leaves no room for MTP at 64k: even with MTP off it needs about 21.2 GiB at 64k, leaving 0.25 GiB spare beside the desktop.
+1. **Qwen3.8-27B model file:** Unsloth's `UD-Q4_K_M` (15.33 GiB), not llama.cpp's reference `Q4_K_M` (17.67 GiB). The reference file leaves no room for MTP at 64k: even with MTP off it needs about 21.2 GiB at 64k, leaving 0.25 GiB spare beside the desktop.
 2. **Repo:** public on GitHub at [Towerism/qwen-local](https://github.com/Towerism/qwen-local). Each change is tracked as an issue.
+
+On 2026-11-04 ([issue #9](https://github.com/Towerism/qwen-local/issues/9)) the user made qlm a runner for a catalog of models, with Qwen3.6-35B-A3B as the default for fresh installs; [ADR 0005](adr/0005-qwen3.6-35b-a3b-model-files-and-vram-budget.md) records why.

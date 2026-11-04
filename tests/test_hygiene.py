@@ -81,3 +81,25 @@ def test_con_pattern_self_check():
         assert PATTERN.search(text), text
     for text in ("config", "context", "second", "icon"):
         assert not PATTERN.search(text), text
+
+
+def test_descriptions_name_no_model():
+    from qlm import cli, pins
+
+    unit = (REPO / "systemd/qlm-server.service").read_text()
+    descriptions = [line for line in unit.splitlines() if line.startswith("Description=")]
+    descriptions.append(cli.build_parser().description)
+    for text in descriptions:
+        assert "qwen" not in text.lower(), text
+        assert not any(model_id in text for model_id in pins.model_ids()), text
+
+
+def test_every_adr_link_resolves():
+    link = re.compile(r"\]\(([^)#\s]+\.md)\)")
+    missing = []
+    for doc in (REPO / "README.md", REPO / "docs/architecture.md"):
+        for target in link.findall(doc.read_text()):
+            path = (doc.parent / target).resolve()
+            if path.parent == REPO / "docs/adr" and not path.is_file():
+                missing.append(f"{doc.relative_to(REPO)}: {target}")
+    assert missing == []

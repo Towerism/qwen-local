@@ -1,4 +1,4 @@
-"""Pinned sources. ADR 0001 pins llama.cpp and ADR 0002 pins the model files.
+"""Pinned sources. ADR 0001 pins llama.cpp, and ADRs 0002 and 0005 pin the model files.
 
 Change these only together with the ADRs; tests compare the two.
 """

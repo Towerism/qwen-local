@@ -5,7 +5,7 @@
 
 ## Decision
 
-Run Qwen3.8-27B with `llama-server` from llama.cpp, built from a pinned release tag with CUDA (NVIDIA's GPU toolkit) for the RTX 4090 (compute capability 8.9). Ollama stays installed but must not hold a model in video memory (VRAM) while `llama-server` runs.
+Run the catalog models (Qwen3.8-27B and Qwen3.6-35B-A3B) with `llama-server` from llama.cpp, built from a pinned release tag with CUDA (NVIDIA's GPU toolkit) for the RTX 4090 (compute capability 8.9). Ollama stays installed but must not hold a model in video memory (VRAM) while `llama-server` runs.
 
 ## Context
 
@@ -15,6 +15,8 @@ qlm runs the model as a local OpenAI-compatible server for coding agents, which 
 2. **Prompt cache reuse.** Qwen3.8 is a hybrid model. 48 of its 64 layers are linear-attention (Gated DeltaNet) layers whose state can't be rolled back to an earlier token. A runtime can only reuse a cached prompt if it saved a checkpoint of that state at or before the point where the new prompt differs. llama-server does this with `--ctx-checkpoints` (default 32 per slot). Reports show Ollama re-processing the whole prompt on hybrid Qwen models ([llama.cpp #20225](https://github.com/ggml-org/llama.cpp/issues/20225), [local-dictation-cleanup #3](https://github.com/xuancongwen/local-dictation-cleanup/issues/3)). At an estimated 1,500–2,500 tok/s prompt processing, re-reading a 50k-token context costs 20–35 s on every turn.
 
 llama-server also gives explicit control over every setting this design depends on: GPU layers, KV-cache type, slot count, whether the vision projector loads, and sampling defaults. It serves both an OpenAI-compatible API (`/v1/chat/completions`) and an Anthropic-compatible one (`/v1/messages`).
+
+The reasons above were worked out for Qwen3.8-27B. Qwen3.6-35B-A3B, added later, runs on the same pinned build with MTP on and the same prompt-cache reuse ([ADR 0005](0005-qwen3.6-35b-a3b-model-files-and-vram-budget.md)).
 
 ## Options considered
 
