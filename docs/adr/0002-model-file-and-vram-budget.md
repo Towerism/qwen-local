@@ -1,4 +1,4 @@
-# ADR 0002: Use Unsloth's UD-Q4_K_M file with the multi-token prediction draft file, 64k context, 8-bit KV cache
+# ADR 0002: Qwen3.8-27B model files and VRAM budget
 
 - **Status:** Accepted (2026-10-16)
 - **Date:** 2026-10-16
