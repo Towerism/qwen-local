@@ -74,6 +74,15 @@ def test_a_fresh_home_checks_vram_for_the_35b_agent_profile(tmp_path, repo):
     assert f"{agent.vram_gib + 0.5:.1f} GiB needed by the agent profile" in line_for(lines, "vram")
 
 
+def test_a_selection_naming_an_unknown_model_fails_one_check_and_the_others_still_run(home, repo):
+    select_model(home, "qwen9-1t")
+    code, lines, _ = run_doctor(home, repo)
+    assert code == 1
+    assert [line for line in lines if not line.startswith("PASS ")] == [line_for(lines, "selected model")]
+    assert line_for(lines, "selected model").startswith("FAIL ")
+    assert "'qwen9-1t'" in line_for(lines, "selected model") and "qlm use <model>" in line_for(lines, "selected model")
+    assert len(lines) == 10
+
 def test_doctor_changes_no_files(home, repo):
     (home / "existing").write_text("x")
     before = {p: p.stat().st_mtime_ns for p in home.rglob("*")}

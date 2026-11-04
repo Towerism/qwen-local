@@ -28,7 +28,8 @@ def run(ctx):
     try:
         model_id = selection.current(ctx)
     except service.Stop as stop:
-        return ctx.fail(stop.what, stop.todo)
+        model_id = None  # disk space and vram depend on the model, so this one FAIL takes their place
+        unselected = Check("FAIL", "selected model", f"{stop.what}; disk space and vram need it. {stop.todo}")
     facts = _Facts(ctx)
     checks = [
         _gpu(facts),
@@ -36,11 +37,11 @@ def run(ctx):
         _nvcc(ctx),
         _host_compiler(ctx),
         _git_and_cmake(ctx),
-        _disk(ctx, model_id),
+        _disk(ctx, model_id) if model_id else unselected,
         _ram(ctx),
         _port(ctx, facts),
         _ollama(ctx),
-        _vram(ctx, facts, model_id),
+        *([_vram(ctx, facts, model_id)] if model_id else []),
         _path(ctx),
     ]
     for c in checks:

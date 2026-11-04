@@ -820,6 +820,15 @@ def test_status_names_a_selection_that_differs_from_active_env(home, repo):
     ]
 
 
+def test_status_names_a_selection_file_naming_an_unknown_model(home, repo):
+    p = install(home, repo)
+    select_model(home, "qwen9-1t")
+    ctx = ctx_for(home, repo)
+    assert cli.main(["status"], ctx) == 0
+    assert ctx.out.getvalue().splitlines() == [
+        "state: stopped", "model: qwen3.8-27b", f"selected: invalid ({p.selection} names 'qwen9-1t')", "profile: agent",
+    ]
+
 def test_status_without_active_env_names_the_selection(home, repo):
     p = install(home, repo)
     p.active_env.unlink()

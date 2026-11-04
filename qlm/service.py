@@ -469,7 +469,10 @@ def status(ctx):
     ctx.say(f"state: {label}")
     alias = selection.active_alias(ctx)
     ctx.say(f"model: {alias or ('unknown' if ctx.paths.active_env.exists() else 'none')}")
-    selected = selection.current(ctx)
+    try:
+        selected = selection.current(ctx)
+    except Stop:
+        selected = f"invalid ({ctx.paths.selection} names {ctx.paths.selection.read_text().strip()!r})"
     if selected != alias:
         ctx.say(f"selected: {selected}")
     try:
