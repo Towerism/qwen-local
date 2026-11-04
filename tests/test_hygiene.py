@@ -20,8 +20,6 @@ def test_no_test_file_or_fixture_contains_a_home_path():
 
 
 def test_no_fixture_holds_an_api_key_shaped_token():
-    import re
-
     token = re.compile(rb"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{43}(?![A-Za-z0-9_-])")
     fake = b"k" * 43
     found = [
