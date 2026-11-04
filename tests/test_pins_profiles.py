@@ -69,12 +69,12 @@ def test_only_the_projector_is_vision_only():
 
 @pytest.mark.parametrize("name, vram", [("agent", 20.3), ("long", 20.0), ("vision", 18.7)])
 def test_profiles_carry_their_vram_need(repo, name, vram):
-    profile = profiles.load(repo / "profiles" / f"{name}.env")
+    profile = profiles.load(repo / "profiles/qwen3.8-27b" / f"{name}.env")
     assert profile.vram_gib == vram
 
 
 def test_rendering_replaces_home_marker(repo, tmp_path):
-    profile = profiles.load(repo / "profiles/agent.env")
+    profile = profiles.load(repo / "profiles/qwen3.8-27b/agent.env")
     text = profile.render(tmp_path / "some home")
     assert "%h" not in text
     assert f"LLAMA_ARG_MODEL={tmp_path}/some home/.local/share/qlm/models/Qwen3.8-27B-UD-Q4_K_M.gguf" in text
@@ -82,14 +82,14 @@ def test_rendering_replaces_home_marker(repo, tmp_path):
 
 
 def test_vision_profile_loads_the_projector_and_drops_the_no_projector_line(repo):
-    keys = profiles.load(repo / "profiles/vision.env").settings
+    keys = profiles.load(repo / "profiles/qwen3.8-27b/vision.env").settings
     assert "LLAMA_ARG_MMPROJ" in keys
     assert "LLAMA_ARG_MMPROJ_AUTO" not in keys
     assert not any(k.startswith("LLAMA_ARG_SPEC_") for k in keys)
 
 
 def test_long_profile_has_no_mtp_and_96k_context(repo):
-    keys = profiles.load(repo / "profiles/long.env").settings
+    keys = profiles.load(repo / "profiles/qwen3.8-27b/long.env").settings
     assert keys["LLAMA_ARG_CTX_SIZE"] == "98304"
     assert not any(k.startswith("LLAMA_ARG_SPEC_") for k in keys)
 
@@ -100,6 +100,61 @@ def test_all_names_used_by_any_profile(repo):
     assert "LLAMA_ARG_MMPROJ" in names
     assert "LLAMA_ARG_MMPROJ_AUTO" in names
     assert all(n.startswith("LLAMA_ARG_") for n in names)
+
+
+def test_all_names_cover_every_model_dir(tmp_path):
+    (tmp_path / "a").mkdir()
+    (tmp_path / "b").mkdir()
+    (tmp_path / "a/x.env").write_text("# qlm: vram_gib=1\nLLAMA_ARG_N_CPU_MOE=4\nLLAMA_ARG_CTX_SIZE=8\n")
+    (tmp_path / "b/y.env").write_text("# qlm: vram_gib=1\nLLAMA_ARG_CTX_SIZE=8\nLLAMA_ARG_JINJA=true\n")
+    assert profiles.all_setting_names(tmp_path) == ["LLAMA_ARG_CTX_SIZE", "LLAMA_ARG_JINJA", "LLAMA_ARG_N_CPU_MOE"]
+
+
+def test_all_names_are_the_union_of_every_profile_in_the_repo(repo):
+    union = set()
+    for path in (repo / "profiles").glob("*/*.env"):
+        union.update(profiles.load(path).settings)
+    assert profiles.all_setting_names(repo / "profiles") == sorted(union)
+
+
+AGENT_27B_BEFORE_THE_MOVE = (
+    "# qlm: vram_gib=20.3\n"
+    "LLAMA_ARG_MODEL={home}/.local/share/qlm/models/Qwen3.8-27B-UD-Q4_K_M.gguf\n"
+    "LLAMA_ARG_SPEC_TYPE=draft-mtp\n"
+    "LLAMA_ARG_SPEC_DRAFT_MODEL={home}/.local/share/qlm/models/mtp-Qwen3.8-27B-Q4_0.gguf\n"
+    "LLAMA_ARG_SPEC_DRAFT_N_MAX=3\n"
+    "LLAMA_ARG_CTX_SIZE=65536\n"
+    "LLAMA_ARG_N_GPU_LAYERS=all\n"
+    "LLAMA_ARG_FIT=off\n"
+    "LLAMA_ARG_FLASH_ATTN=on\n"
+    "LLAMA_ARG_CACHE_TYPE_K=q8_0\n"
+    "LLAMA_ARG_CACHE_TYPE_V=q8_0\n"
+    "LLAMA_ARG_N_PARALLEL=1\n"
+    "LLAMA_ARG_MMPROJ_AUTO=false\n"
+    "LLAMA_ARG_CTX_CHECKPOINTS=32\n"
+    "LLAMA_ARG_CACHE_RAM=16384\n"
+    "LLAMA_ARG_JINJA=true\n"
+    "LLAMA_ARG_THINK=auto\n"
+    "LLAMA_ARG_ALIAS=qwen3.8-27b\n"
+    "LLAMA_ARG_HOST=127.0.0.1\n"
+    "LLAMA_ARG_PORT=9931\n"
+    "LLAMA_ARG_ENDPOINT_METRICS=true\n"
+    "LLAMA_ARG_ENDPOINT_SLOTS=false\n"
+    "LLAMA_ARG_UI=false\n"
+    "LLAMA_ARG_CORS_ORIGINS=http://qlm.invalid\n"
+    "LLAMA_ARG_API_KEY_FILE={home}/.config/qlm/api-key\n"
+    "LLAMA_ARG_TEMPERATURE=1.0\n"
+    "LLAMA_ARG_TOP_P=0.95\n"
+    "LLAMA_ARG_TOP_K=20\n"
+    "LLAMA_ARG_MIN_P=0.0\n"
+    "LLAMA_ARG_PRESENCE_PENALTY=0.0\n"
+)
+
+
+def test_the_moved_27b_agent_profile_renders_as_before(repo, tmp_path):
+    home = tmp_path / "some home"
+    text = profiles.load(repo / "profiles/qwen3.8-27b/agent.env").render(home)
+    assert text == AGENT_27B_BEFORE_THE_MOVE.format(home=home)
 
 
 @pytest.mark.parametrize(

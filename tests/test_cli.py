@@ -29,9 +29,9 @@ EXPECTED_FILES = [
     "qlm/interrupts.py",
     "qlm/uninstall.py",
     "qlm/bench.py",
-    "profiles/agent.env",
-    "profiles/long.env",
-    "profiles/vision.env",
+    "profiles/qwen3.8-27b/agent.env",
+    "profiles/qwen3.8-27b/long.env",
+    "profiles/qwen3.8-27b/vision.env",
     "systemd/qlm-server.service",
     "pyproject.toml",
 ]

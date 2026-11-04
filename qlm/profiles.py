@@ -51,8 +51,15 @@ def load_all(profiles_dir):
     return {p.stem: load(p) for p in sorted(Path(profiles_dir).glob("*.env"))}
 
 
-def all_setting_names(profiles_dir):
+def load_catalog(profiles_root):
+    """{model id: {name: Profile}} for every profiles/<model id>/<name>.env."""
+    return {d.name: load_all(d) for d in sorted(Path(profiles_root).iterdir()) if d.is_dir()}
+
+
+def all_setting_names(profiles_root):
+    """Every LLAMA_ARG_* name used by any profile of any model."""
     names = set()
-    for profile in load_all(profiles_dir).values():
-        names.update(profile.settings)
+    for model_profiles in load_catalog(profiles_root).values():
+        for profile in model_profiles.values():
+            names.update(profile.settings)
     return sorted(names)

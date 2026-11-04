@@ -225,7 +225,7 @@ def test_profile_and_key_are_created_once_with_private_modes(home, repo):
     assert mode(m.paths.config_dir) == 0o700
     assert m.paths.api_key.read_bytes() == key
     assert m.paths.active_env.read_bytes() == env
-    assert env.decode() == profiles.load(repo / "profiles/agent.env").render(home)
+    assert env.decode() == profiles.load(repo / "profiles/qwen3.8-27b/agent.env").render(home)
 
 
 def test_existing_config_dir_is_tightened_to_0700(home, repo):

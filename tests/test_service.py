@@ -54,7 +54,7 @@ def install(home, repo, profile="agent", key="k" * 43):
     server.parent.mkdir(parents=True)
     server.write_text("")
     p.config_dir.mkdir(parents=True)
-    p.active_env.write_text(profiles.load(p.profiles_dir / f"{profile}.env").render(home))
+    p.active_env.write_text(profiles.load(p.model_profiles_dir("qwen3.8-27b") / f"{profile}.env").render(home))
     os.chmod(p.active_env, 0o600)
     p.api_key.write_text(key)
     p.models.mkdir(parents=True)
@@ -64,7 +64,7 @@ def install(home, repo, profile="agent", key="k" * 43):
 
 
 def rendered(home, repo, name):
-    return profiles.load(repo / "profiles" / f"{name}.env").render(home)
+    return profiles.load(repo / "profiles/qwen3.8-27b" / f"{name}.env").render(home)
 
 
 def runner(overrides=None):

@@ -113,7 +113,7 @@ def _dispatch(args, ctx):
     if args.command == "profile":
         from qlm import profiles, service
 
-        names = sorted(profiles.load_all(ctx.paths.profiles_dir))
+        names = sorted(profiles.load_all(ctx.paths.model_profiles_dir("qwen3.8-27b")))
         if args.name not in names:
             print(f"qlm: no profile named {args.name!r}. Choose one of: {', '.join(names)}.", file=ctx.err)
             return 2

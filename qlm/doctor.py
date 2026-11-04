@@ -176,7 +176,7 @@ def _vram(ctx, f):
         return Check("FAIL", "vram", f.gpu_problem)
     if f.server_pid is not None:
         return Check("PASS", "vram", "server running")
-    agent = profiles.load(ctx.paths.profiles_dir / "agent.env")
+    agent = profiles.load(ctx.paths.model_profiles_dir("qwen3.8-27b") / "agent.env")
     need_mib = agent.vram_gib * 1024 + 512
     free_mib = f.gpu["total"] - f.gpu["used"]
     detail = f"{free_mib / 1024:.1f} GiB free, {need_mib / 1024:.1f} GiB needed by the agent profile"

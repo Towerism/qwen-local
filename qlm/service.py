@@ -101,7 +101,7 @@ def active_profile(ctx):
 def active_profile_name(ctx):
     """The profile whose rendering active.env equals, or "custom"."""
     text = ctx.paths.active_env.read_text() if ctx.paths.active_env.exists() else None
-    for name, profile in profiles.load_all(ctx.paths.profiles_dir).items():
+    for name, profile in profiles.load_all(ctx.paths.model_profiles_dir("qwen3.8-27b")).items():
         if profile.render(ctx.paths.home) == text:
             return name
     return "custom"
@@ -309,7 +309,7 @@ def bring_up(ctx, restart):
 
 def profile_use(ctx, name):
     p = ctx.paths
-    profile = profiles.load(p.profiles_dir / f"{name}.env")
+    profile = profiles.load(p.model_profiles_dir("qwen3.8-27b") / f"{name}.env")
     text = profile.render(p.home)
     missing = missing_files(profiles.parse(name, text).settings)
     if missing:

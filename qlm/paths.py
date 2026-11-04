@@ -79,6 +79,9 @@ class Paths:
     def profiles_dir(self):
         return self.repo / "profiles"
 
+    def model_profiles_dir(self, model_id):
+        return self.profiles_dir / model_id
+
     @property
     def unit_template(self):
         return self.repo / "systemd/qlm-server.service"
