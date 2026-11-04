@@ -4,7 +4,7 @@ import stat
 import pytest
 
 from qlm import cli, install, pins, profiles
-from tests.fakes import FakeRunner, fail, make_ctx, ok
+from tests.fakes import FakeRunner, fail, make_ctx, ok, select_model
 
 TAG = pins.LLAMA_TAG
 COMMIT = pins.LLAMA_COMMIT
@@ -225,7 +225,33 @@ def test_profile_and_key_are_created_once_with_private_modes(home, repo):
     assert mode(m.paths.config_dir) == 0o700
     assert m.paths.api_key.read_bytes() == key
     assert m.paths.active_env.read_bytes() == env
-    assert env.decode() == profiles.load(repo / "profiles/qwen3.8-27b/agent.env").render(home)
+
+
+def test_a_fresh_install_selects_the_default_model_and_writes_its_agent_profile(home, repo):
+    m = Machine(home, repo)
+    assert m.install()[0] == 0
+    assert m.paths.selection.read_text() == pins.DEFAULT_MODEL + "\n" == "qwen3.6-35b-a3b\n"
+    assert mode(m.paths.selection) == 0o600
+    expected = profiles.load(repo / "profiles/qwen3.6-35b-a3b/agent.env").render(home)
+    assert m.paths.active_env.read_text() == expected
+
+
+def test_install_keeps_an_existing_27b_active_env_and_writes_no_selection(home, repo):
+    m = Machine(home, repo)
+    m.paths.config_dir.mkdir(parents=True, mode=0o700)
+    existing = profiles.load(repo / "profiles/qwen3.8-27b/agent.env").render(home)
+    m.paths.active_env.write_text(existing)
+    assert m.install()[0] == 0
+    assert m.paths.active_env.read_text() == existing
+    assert not m.paths.selection.exists()
+
+
+def test_install_seeds_active_env_from_a_model_selected_before_it(home, repo):
+    m = Machine(home, repo)
+    select_model(home, "qwen3.8-27b")
+    assert m.install()[0] == 0
+    assert m.paths.selection.read_text() == "qwen3.8-27b\n"
+    assert m.paths.active_env.read_text() == profiles.load(repo / "profiles/qwen3.8-27b/agent.env").render(home)
 
 
 def test_existing_config_dir_is_tightened_to_0700(home, repo):

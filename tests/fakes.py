@@ -251,6 +251,13 @@ def make_ctx(home, repo, runner=None, http=None, clock=None, env=None):
     )
 
 
+def select_model(home, model_id):
+    """Write ~/.config/qlm/model as qlm use does."""
+    config = Paths(home=home, repo=".").config_dir
+    config.mkdir(parents=True, exist_ok=True, mode=0o700)
+    (config / "model").write_text(f"{model_id}\n")
+
+
 def small_pins(monkeypatch, model_id="qwen3.8-27b"):
     """Replace every model's pinned files with small byte strings and their real hashes.
 

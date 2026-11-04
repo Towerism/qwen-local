@@ -6,12 +6,14 @@ import pytest
 
 from qlm import cli, fetch, pins
 from qlm.system import RedirectRefused, SafeRedirectHandler, redirect_allowed
-from tests.fakes import FakeEnv, FakeHttp, make_ctx, small_pins
+from tests.fakes import FakeEnv, FakeHttp, make_ctx, select_model, small_pins
 
 
 @pytest.fixture
-def pinned(monkeypatch):
-    return small_pins(monkeypatch)
+def pinned(monkeypatch, home):
+    """The 27B files: the cases below count its main, draft and vision projector."""
+    select_model(home, "qwen3.8-27b")
+    return small_pins(monkeypatch, "qwen3.8-27b")
 
 
 def run_fetch(home, repo, http, *args, env=None):
@@ -24,6 +26,18 @@ def models(home):
     d = home / ".local/share/qlm/models"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def test_a_fresh_home_fetches_the_35b_files(home, repo, monkeypatch):
+    files, contents, urls = small_pins(monkeypatch, "qwen3.6-35b-a3b")
+    http = FakeHttp(urls)
+
+    code, ctx = run_fetch(home, repo, http)
+
+    assert code == 0, ctx.err.getvalue()
+    assert sorted(r["url"] for r in http.requests) == sorted(pins.download_url(f) for f in files)
+    for f in files:
+        assert (models(home) / f.local_name).read_bytes() == contents[f.local_name]
 
 
 def test_present_files_make_no_requests(home, repo, pinned):

@@ -3,7 +3,7 @@
 import os
 from dataclasses import dataclass
 
-from qlm import pins, profiles
+from qlm import pins, profiles, selection, service
 
 GIB = 2**30
 MIB = 2**20
@@ -25,6 +25,10 @@ class Check:
 
 
 def run(ctx):
+    try:
+        model_id = selection.current(ctx)
+    except service.Stop as stop:
+        return ctx.fail(stop.what, stop.todo)
     facts = _Facts(ctx)
     checks = [
         _gpu(facts),
@@ -32,11 +36,11 @@ def run(ctx):
         _nvcc(ctx),
         _host_compiler(ctx),
         _git_and_cmake(ctx),
-        _disk(ctx),
+        _disk(ctx, model_id),
         _ram(ctx),
         _port(ctx, facts),
         _ollama(ctx),
-        _vram(ctx, facts),
+        _vram(ctx, facts, model_id),
         _path(ctx),
     ]
     for c in checks:
@@ -124,9 +128,9 @@ def _git_and_cmake(ctx):
     return Check("PASS", "git and cmake", "found")
 
 
-def _missing_model_bytes(ctx):
+def _missing_model_bytes(ctx, model_id):
     missing = 0
-    for f in pins.files(pins.model("qwen3.8-27b")):
+    for f in pins.files(pins.model(model_id)):
         final = ctx.paths.models / f.local_name
         part = ctx.paths.models / (f.local_name + ".part")
         if final.exists() and final.stat().st_size == f.size:
@@ -136,8 +140,8 @@ def _missing_model_bytes(ctx):
     return missing
 
 
-def _disk(ctx):
-    need = _missing_model_bytes(ctx) + BUILD_SPACE
+def _disk(ctx, model_id):
+    need = _missing_model_bytes(ctx, model_id) + BUILD_SPACE
     free = ctx.env.disk_free(ctx.paths.home)
     detail = f"{free / GIB:.1f} GiB free, {need / GIB:.1f} GiB needed"
     return Check("PASS" if free >= need else "FAIL", "disk space", detail)
@@ -171,12 +175,12 @@ def _ollama(ctx):
     return Check("PASS", "ollama", "no model on the GPU")
 
 
-def _vram(ctx, f):
+def _vram(ctx, f, model_id):
     if f.gpu is None:
         return Check("FAIL", "vram", f.gpu_problem)
     if f.server_pid is not None:
         return Check("PASS", "vram", "server running")
-    agent = profiles.load(ctx.paths.model_profiles_dir("qwen3.8-27b") / "agent.env")
+    agent = profiles.load(ctx.paths.model_profiles_dir(model_id) / "agent.env")
     need_mib = agent.vram_gib * 1024 + 512
     free_mib = f.gpu["total"] - f.gpu["used"]
     detail = f"{free_mib / 1024:.1f} GiB free, {need_mib / 1024:.1f} GiB needed by the agent profile"

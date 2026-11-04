@@ -18,6 +18,7 @@ EXPECTED_FILES = [
     "qlm/paths.py",
     "qlm/pins.py",
     "qlm/profiles.py",
+    "qlm/selection.py",
     "qlm/system.py",
     "qlm/doctor.py",
     "qlm/install.py",
@@ -63,7 +64,7 @@ def test_help_has_no_con_command(home, repo):
     sub = next(a for a in cli.build_parser()._actions if isinstance(a, argparse._SubParsersAction))
     assert word not in sub.choices and suggest not in sub.choices
     assert set(sub.choices) == {
-        "doctor", "install", "fetch", "profile", "start", "stop", "status", "smoke", "bench", "update", "uninstall", "logs",
+        "doctor", "install", "fetch", "use", "profile", "start", "stop", "status", "smoke", "bench", "update", "uninstall", "logs",
     }
     assert cli.main([word, "--print"], make_ctx(home, repo)) == 2
     assert cli.main([suggest, "--enable"], make_ctx(home, repo)) == 2
@@ -115,7 +116,7 @@ def test_every_path_lives_under_the_given_home(home, repo):
     paths = Paths(home=home, repo=repo)
     for name in (
         "llama_src", "llama_opt", "llama_current", "models", "config_dir", "active_env",
-        "api_key", "unit_file", "state_dir", "logs", "bench", "bench_backup", "local_bin", "qlm_link",
+        "api_key", "selection", "unit_file", "state_dir", "logs", "bench", "bench_backup", "local_bin", "qlm_link",
     ):
         value = getattr(paths, name)
         assert pathlib.Path(value).is_relative_to(home), name

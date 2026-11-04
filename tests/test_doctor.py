@@ -1,10 +1,19 @@
-from qlm import cli
-from tests.fakes import FakeEnv, FakeRunner, fail, make_ctx, ok
+import pytest
+
+from qlm import cli, profiles
+from tests.fakes import FakeEnv, FakeRunner, fail, make_ctx, ok, select_model, small_pins
 
 GPU = ("nvidia-smi", "--query-gpu=name,compute_cap,memory.total,memory.used,driver_version",
        "--format=csv,noheader,nounits")
 APPS = ("nvidia-smi", "--query-compute-apps=pid,process_name,used_memory", "--format=csv,noheader,nounits")
 OLLAMA_HEADER = "NAME    ID    SIZE    PROCESSOR    CONTEXT    RUNNER    UNTIL\n"
+
+
+@pytest.fixture
+def home(home):
+    """The numbers below fit the 27B agent profile, so these homes select 27B."""
+    select_model(home, "qwen3.8-27b")
+    return home
 
 
 def healthy_runner(overrides=None):
@@ -55,6 +64,14 @@ def test_low_vram_warns_and_names_each_gpu_process(home, repo):
     assert vram.startswith("WARN ")
     assert "/usr/bin/compositor (331 MiB)" in vram
     assert "/usr/lib/browser --flag=a,b (2100 MiB)" in vram
+
+
+def test_a_fresh_home_checks_vram_for_the_35b_agent_profile(tmp_path, repo):
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    agent = profiles.load(repo / "profiles/qwen3.6-35b-a3b/agent.env")
+    _, lines, _ = run_doctor(fresh, repo)
+    assert f"{agent.vram_gib + 0.5:.1f} GiB needed by the agent profile" in line_for(lines, "vram")
 
 
 def test_doctor_changes_no_files(home, repo):
@@ -144,9 +161,7 @@ def test_local_bin_missing_from_path_warns_with_the_line_to_add(home, repo):
 
 
 def test_disk_space_counts_files_already_present(home, repo, monkeypatch):
-    from tests.fakes import small_pins
-
-    files, contents, _ = small_pins(monkeypatch)
+    files, contents, _ = small_pins(monkeypatch, "qwen3.8-27b")
     models = home / ".local/share/qlm/models"
     models.mkdir(parents=True)
     (models / files[0].local_name).write_bytes(contents[files[0].local_name])

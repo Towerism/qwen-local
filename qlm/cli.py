@@ -25,6 +25,18 @@ def build_parser():
     install.add_argument("--rebuild", action="store_true", help="build again even if this tag is installed")
     fetch = sub.add_parser("fetch", help="download and verify the pinned model files")
     fetch.add_argument("--vision", action="store_true", help="also fetch the vision projector")
+    use_model = sub.add_parser(
+        "use",
+        help="select the model to run; restarts the server if it is running",
+        description=(
+            "Select a catalog model and save the choice in ~/.config/qlm/model. When its files are present, "
+            "the same profile as now (or agent) is written to active.env, and a running server restarts with it. "
+            "When they are missing, only the choice is saved: run qlm fetch, then qlm start. "
+            "If the restart fails, active.env keeps the new model's profile while the previous model stays "
+            "selected; fix the cause and run qlm use again."
+        ),
+    )
+    use_model.add_argument("model", metavar="<model>", help="one of: " + ", ".join(pins.model_ids()))
     profile = sub.add_parser("profile", help="switch the server profile")
     profile_sub = profile.add_subparsers(dest="action", metavar="<action>", parser_class=_Parser)
     profile_sub.required = True
@@ -110,10 +122,20 @@ def _dispatch(args, ctx):
         from qlm import fetch
 
         return fetch.run(ctx, vision=args.vision)
-    if args.command == "profile":
-        from qlm import profiles, service
+    if args.command == "use":
+        from qlm import service
 
-        names = sorted(profiles.load_all(ctx.paths.model_profiles_dir("qwen3.8-27b")))
+        if args.model not in pins.model_ids():
+            print(f"qlm: no model named {args.model!r}. Choose one of: {', '.join(pins.model_ids())}.", file=ctx.err)
+            return 2
+        return service.run(ctx, service.use, model_id=args.model)
+    if args.command == "profile":
+        from qlm import selection, service
+
+        try:
+            names = sorted(service.model_profiles(ctx, selection.current(ctx)))
+        except service.Stop as stop:
+            return ctx.fail(stop.what, stop.todo)
         if args.name not in names:
             print(f"qlm: no profile named {args.name!r}. Choose one of: {', '.join(names)}.", file=ctx.err)
             return 2

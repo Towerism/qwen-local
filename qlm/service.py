@@ -1,4 +1,4 @@
-"""`qlm profile use`, `start`, `stop`, `status` and `logs`: the server's systemd user unit and its health.
+"""`qlm use`, `profile use`, `start`, `stop`, `status` and `logs`: the server's systemd user unit and its health.
 
 The VRAM check before every start compares free video memory with the profile's `vram_gib`
 plus 0.5 GiB (docs/architecture.md). A start that doesn't reach a healthy server is stopped,
@@ -9,7 +9,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from qlm import files, profiles
+from qlm import files, pins, profiles, selection
 from qlm.system import SERVER, ServerUnreachable
 
 UNIT = "qlm-server"
@@ -98,10 +98,17 @@ def active_profile(ctx):
         raise Stop(f"{p.active_env} doesn't parse: {e}", "Run qlm profile use agent") from None
 
 
+def model_profiles(ctx, model_id):
+    return profiles.load_all(ctx.paths.model_profiles_dir(model_id))
+
+
 def active_profile_name(ctx):
-    """The profile whose rendering active.env equals, or "custom"."""
-    text = ctx.paths.active_env.read_text() if ctx.paths.active_env.exists() else None
-    for name, profile in profiles.load_all(ctx.paths.model_profiles_dir("qwen3.8-27b")).items():
+    """The profile of active.env's own model whose rendering active.env equals, or "custom"."""
+    model_id = selection.active_alias(ctx)
+    if model_id not in pins.model_ids():
+        return "custom"
+    text = ctx.paths.active_env.read_text()
+    for name, profile in model_profiles(ctx, model_id).items():
         if profile.render(ctx.paths.home) == text:
             return name
     return "custom"
@@ -307,9 +314,9 @@ def bring_up(ctx, restart):
     return True
 
 
-def profile_use(ctx, name):
+def profile_use(ctx, name, model_id=None):
     p = ctx.paths
-    profile = profiles.load(p.model_profiles_dir("qwen3.8-27b") / f"{name}.env")
+    profile = profiles.load(p.model_profiles_dir(model_id or selection.current(ctx)) / f"{name}.env")
     text = profile.render(p.home)
     missing = missing_files(profiles.parse(name, text).settings)
     if missing:
@@ -336,6 +343,39 @@ def profile_use(ctx, name):
     if ready is None:
         _give_up(ctx, t0, f"The {name} profile didn't start. Go back with {back}")
     _report_ready(ctx, t0, ready, name)
+    return 0
+
+
+def use(ctx, model_id):
+    """Select a model and render its profile into active.env, restarting a running server.
+
+    The selection is saved only once the profile is in place, except when the model's files are
+    missing: then only the selection is saved, so qlm fetch knows what to fetch.
+    """
+    p = ctx.paths
+    try:
+        selected = selection.current(ctx)
+    except Stop:
+        selected = None  # an unreadable selection is what qlm use replaces
+    if selected == model_id and selection.active_alias(ctx) == model_id:
+        ctx.say(f"{model_id} is already selected.")
+        return 0
+    available = model_profiles(ctx, model_id)
+    previous = active_profile_name(ctx)
+    name = previous if previous in available else "agent"
+    replacing_custom = p.active_env.exists() and previous == "custom"
+    missing = missing_files(profiles.parse(name, available[name].render(p.home)).settings)
+    if missing:
+        selection.save(ctx, model_id)
+        raise Stop(
+            f"{model_id} is selected but its files are missing: " + ", ".join(path for _, path in missing),
+            f"{_fetch_hint(missing)}, then qlm start {name}",
+        )
+    profile_use(ctx, name, model_id)
+    selection.save(ctx, model_id)
+    if replacing_custom:
+        ctx.say(f"Replaced the custom active.env with the {name} profile of {model_id}.")
+    ctx.say(f"{model_id} is selected.")
     return 0
 
 
@@ -387,6 +427,11 @@ def status(ctx):
     ready = state.running and health_status(ctx) == 200
     label = "running" if ready else "loading" if state.running else STATE_LABELS.get(state.active, state.active)
     ctx.say(f"state: {label}")
+    alias = selection.active_alias(ctx)
+    ctx.say(f"model: {alias or ('unknown' if ctx.paths.active_env.exists() else 'none')}")
+    selected = selection.current(ctx)
+    if selected != alias:
+        ctx.say(f"selected: {selected}")
     try:
         profile = active_profile(ctx)
         ctx.say(f"profile: {active_profile_name(ctx)}")

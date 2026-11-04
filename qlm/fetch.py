@@ -9,7 +9,7 @@ import http.client
 import os
 import re
 
-from qlm import pins
+from qlm import pins, selection, service
 from qlm.system import RedirectRefused
 
 GIB = 2**30
@@ -45,12 +45,14 @@ def run(ctx, vision=False):
         return _run(ctx, vision)
     except OSError as e:
         return ctx.fail(f"file error: {e}", "Check the path and disk, then run qlm fetch again")
+    except service.Stop as stop:
+        return ctx.fail(stop.what, stop.todo)
 
 
 def _run(ctx, vision):
+    wanted = pins.files(pins.model(selection.current(ctx)), vision)
     models = ctx.paths.models
     models.mkdir(parents=True, exist_ok=True)
-    wanted = pins.files(pins.model("qwen3.8-27b"), vision)
     failed, pending = [], []
 
     for f in wanted:

@@ -15,6 +15,7 @@ import pytest
 from qlm import cli, doctor, pins
 from qlm.paths import Paths
 from qlm.system import Clock, Ctx, Env, Http, Runner
+from tests.fakes import select_model
 
 pytestmark = pytest.mark.machine
 
@@ -41,6 +42,7 @@ def test_fetch_verifies_the_files_already_on_disk_without_downloading(repo, tmp_
     models.mkdir(parents=True)
     for f in pins.files(pins.model("qwen3.8-27b")):
         (models / f.local_name).symlink_to(real_models / f.local_name)
+    select_model(home, "qwen3.8-27b")
 
     class NoHttp:
         def get(self, *a, **k):

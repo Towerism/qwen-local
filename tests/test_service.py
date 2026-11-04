@@ -5,9 +5,9 @@ import stat
 
 import pytest
 
-from qlm import cli, profiles
+from qlm import cli, pins, profiles
 from qlm.system import ServerUnreachable
-from tests.fakes import FakeClock, FakeEnv, FakeRunner, FakeServer, fail, make_ctx, ok, reply
+from tests.fakes import FakeClock, FakeEnv, FakeRunner, FakeServer, fail, make_ctx, ok, reply, select_model
 
 SHOW = ("systemctl", "--user", "show")
 START = ("systemctl", "--user", "start", "qlm-server")
@@ -45,7 +45,7 @@ def health(status=200):
     return reply(status, {"status": "ok"} if status == 200 else {"error": {"message": "Loading model"}})
 
 
-def install(home, repo, profile="agent", key="k" * 43):
+def install(home, repo, profile="agent", key="k" * 43, model="qwen3.8-27b"):
     """A home as `qlm install` and `qlm fetch` leave it: unit, build, profile, key and model files."""
     p = make_ctx(home, repo).paths
     p.unit_file.parent.mkdir(parents=True)
@@ -54,17 +54,22 @@ def install(home, repo, profile="agent", key="k" * 43):
     server.parent.mkdir(parents=True)
     server.write_text("")
     p.config_dir.mkdir(parents=True)
-    p.active_env.write_text(profiles.load(p.model_profiles_dir("qwen3.8-27b") / f"{profile}.env").render(home))
+    p.active_env.write_text(rendered(home, repo, profile, model))
     os.chmod(p.active_env, 0o600)
     p.api_key.write_text(key)
-    p.models.mkdir(parents=True)
-    for name in ("Qwen3.8-27B-UD-Q4_K_M.gguf", "mtp-Qwen3.8-27B-Q4_0.gguf"):
-        (p.models / name).write_text("")
+    add_model_files(p, model)
+    select_model(home, model)
     return p
 
 
-def rendered(home, repo, name):
-    return profiles.load(repo / "profiles/qwen3.8-27b" / f"{name}.env").render(home)
+def add_model_files(p, model_id):
+    p.models.mkdir(parents=True, exist_ok=True)
+    for f in pins.files(pins.model(model_id)):
+        (p.models / f.local_name).write_text("")
+
+
+def rendered(home, repo, name, model="qwen3.8-27b"):
+    return profiles.load(repo / "profiles" / model / f"{name}.env").render(home)
 
 
 def runner(overrides=None):
@@ -101,6 +106,7 @@ def out(ctx):
 
 
 def test_unknown_profile_is_a_usage_error_listing_the_profiles(home, repo):
+    select_model(home, "qwen3.8-27b")
     ctx = ctx_for(home, repo)
     assert cli.main(["profile", "use", "turbo"], ctx) == 2
     assert "agent, long, vision" in out(ctx)
@@ -178,6 +184,115 @@ def test_a_failed_restart_stops_the_unit_and_names_the_way_back(home, repo):
     assert len(run.ran(*STOP)) == 1
     assert "failed to allocate CUDA buffer" in out(ctx)
     assert "qlm profile use agent" in out(ctx)
+
+
+# use
+
+
+def test_use_with_an_unknown_model_is_a_usage_error_listing_the_ids(home, repo):
+    ctx = ctx_for(home, repo)
+    assert cli.main(["use", "bogus"], ctx) == 2
+    assert "qwen3.6-35b-a3b, qwen3.8-27b" in ctx.err.getvalue()
+    assert not make_ctx(home, repo).paths.selection.exists()
+
+
+def test_use_while_stopped_saves_the_choice_and_renders_its_agent_profile(home, repo):
+    p = install(home, repo, model="qwen3.6-35b-a3b")
+    add_model_files(p, "qwen3.8-27b")
+    run = runner()
+    ctx = ctx_for(home, repo, run=run)
+    assert cli.main(["use", "qwen3.8-27b"], ctx) == 0
+    assert p.selection.read_text() == "qwen3.8-27b\n"
+    assert stat.S_IMODE(p.selection.stat().st_mode) == 0o600
+    assert p.active_env.read_text() == rendered(home, repo, "agent", "qwen3.8-27b")
+    assert run.ran(*RESTART) == [] and run.ran(*START) == []
+    assert "qwen3.8-27b is selected" in out(ctx)
+
+
+def test_use_keeps_the_profile_name_when_the_new_model_has_it(home, repo):
+    p = install(home, repo, profile="long")
+    add_model_files(p, "qwen3.6-35b-a3b")
+    ctx = ctx_for(home, repo)
+    assert cli.main(["use", "qwen3.6-35b-a3b"], ctx) == 0
+    assert p.active_env.read_text() == rendered(home, repo, "long", "qwen3.6-35b-a3b")
+
+
+def test_use_while_running_restarts_the_server_with_the_new_model(home, repo):
+    p = install(home, repo)
+    add_model_files(p, "qwen3.6-35b-a3b")
+    run = runner({SHOW: RUNNING, SMI_APPS: apps(("4321", "llama-server", "20800"))})
+    ctx = ctx_for(home, repo, run=run)
+    assert cli.main(["use", "qwen3.6-35b-a3b"], ctx) == 0
+    assert p.selection.read_text() == "qwen3.6-35b-a3b\n"
+    assert p.active_env.read_text() == rendered(home, repo, "agent", "qwen3.6-35b-a3b")
+    assert len(run.ran(*RESTART)) == 1
+    assert "ready" in out(ctx)
+
+
+def test_use_with_missing_files_saves_only_the_choice(home, repo):
+    p = install(home, repo)
+    before = p.active_env.read_bytes()
+    run = runner({SHOW: RUNNING})
+    ctx = ctx_for(home, repo, run=run)
+    assert cli.main(["use", "qwen3.6-35b-a3b"], ctx) == 1
+    assert p.selection.read_text() == "qwen3.6-35b-a3b\n"
+    assert p.active_env.read_bytes() == before
+    assert run.calls == []
+    assert "qwen3.6-35b-a3b is selected but its files are missing" in out(ctx)
+    assert "Run qlm fetch, then qlm start agent" in out(ctx)
+
+
+def test_use_refused_for_vram_changes_neither_file(home, repo):
+    p = install(home, repo)
+    add_model_files(p, "qwen3.6-35b-a3b")
+    before = p.selection.read_bytes(), p.active_env.read_bytes()
+    run = runner({SHOW: RUNNING, SMI_GPU: gpu(24564, 24000), SMI_APPS: apps(("4321", "llama-server", "20000"))})
+    ctx = ctx_for(home, repo, run=run)
+    assert cli.main(["use", "qwen3.6-35b-a3b"], ctx) == 1
+    assert "not enough VRAM" in out(ctx)
+    assert (p.selection.read_bytes(), p.active_env.read_bytes()) == before
+    assert run.ran(*RESTART) == []
+
+
+def test_a_failed_restart_in_use_keeps_the_previous_selection(home, repo):
+    p = install(home, repo)
+    add_model_files(p, "qwen3.6-35b-a3b")
+    run = runner({SHOW: [RUNNING, RUNNING, unit("failed", "failed", 0)], SMI_APPS: apps(("4321", "llama-server", "20800"))})
+    ctx = ctx_for(home, repo, run=run, server=FakeServer({("GET", "/health"): REFUSED}))
+    assert cli.main(["use", "qwen3.6-35b-a3b"], ctx) == 1
+    assert len(run.ran(*STOP)) == 1
+    assert p.selection.read_text() == "qwen3.8-27b\n"
+    assert p.active_env.read_text() == rendered(home, repo, "agent", "qwen3.6-35b-a3b")
+
+
+def test_use_says_when_it_replaces_a_custom_active_env(home, repo):
+    p = install(home, repo)
+    add_model_files(p, "qwen3.6-35b-a3b")
+    p.active_env.write_text(p.active_env.read_text().replace("65536", "60000"))
+    ctx = ctx_for(home, repo)
+    assert cli.main(["use", "qwen3.6-35b-a3b"], ctx) == 0
+    assert "Replaced the custom active.env with the agent profile of qwen3.6-35b-a3b." in out(ctx)
+    assert p.active_env.read_text() == rendered(home, repo, "agent", "qwen3.6-35b-a3b")
+
+
+def test_use_of_the_selected_model_keeps_its_custom_active_env(home, repo):
+    p = install(home, repo)
+    p.active_env.write_text(p.active_env.read_text().replace("65536", "60000"))
+    before = p.selection.read_bytes(), p.active_env.read_bytes()
+    run = runner({SHOW: RUNNING})
+    ctx = ctx_for(home, repo, run=run)
+    assert cli.main(["use", "qwen3.8-27b"], ctx) == 0
+    assert "qwen3.8-27b is already selected." in out(ctx)
+    assert (p.selection.read_bytes(), p.active_env.read_bytes()) == before
+    assert run.calls == []
+
+
+def test_use_replaces_a_selection_file_naming_an_unknown_model(home, repo):
+    p = install(home, repo)
+    p.selection.write_text("qwen9-1t\n")
+    ctx = ctx_for(home, repo)
+    assert cli.main(["use", "qwen3.8-27b"], ctx) == 0
+    assert p.selection.read_text() == "qwen3.8-27b\n"
 
 
 # start: already running
@@ -460,6 +575,7 @@ def test_status_of_a_ready_server(home, repo):
     lines = ctx.out.getvalue().splitlines()
     assert lines == [
         "state: running",
+        "model: qwen3.8-27b",
         "profile: agent",
         "pid: 4321",
         "uptime: 1h 2m 5s",
@@ -493,7 +609,7 @@ def test_status_when_stopped(home, repo):
     install(home, repo)
     ctx = ctx_for(home, repo)
     assert cli.main(["status"], ctx) == 0
-    assert ctx.out.getvalue().splitlines() == ["state: stopped", "profile: agent"]
+    assert ctx.out.getvalue().splitlines() == ["state: stopped", "model: qwen3.8-27b", "profile: agent"]
 
 
 @pytest.mark.parametrize("active, label", [("failed", "failed"), ("deactivating", "stopping")])
@@ -520,6 +636,35 @@ def test_status_without_the_unit_file_fails(home, repo):
     ctx = ctx_for(home, repo)
     assert cli.main(["status"], ctx) == 1
     assert "qlm install" in out(ctx)
+
+
+def test_status_of_an_install_from_before_model_selection(home, repo):
+    p = install(home, repo)
+    p.selection.unlink()
+    ctx = ctx_for(home, repo)
+    assert cli.main(["status"], ctx) == 0
+    assert ctx.out.getvalue().splitlines() == ["state: stopped", "model: qwen3.8-27b", "profile: agent"]
+    assert not p.selection.exists()
+
+
+def test_status_names_a_selection_that_differs_from_active_env(home, repo):
+    install(home, repo)
+    select_model(home, "qwen3.6-35b-a3b")
+    ctx = ctx_for(home, repo)
+    assert cli.main(["status"], ctx) == 0
+    assert ctx.out.getvalue().splitlines() == [
+        "state: stopped", "model: qwen3.8-27b", "selected: qwen3.6-35b-a3b", "profile: agent",
+    ]
+
+
+def test_status_without_active_env_names_the_selection(home, repo):
+    p = install(home, repo)
+    p.active_env.unlink()
+    p.selection.unlink()
+    ctx = ctx_for(home, repo)
+    assert cli.main(["status"], ctx) == 0
+    lines = ctx.out.getvalue().splitlines()
+    assert lines[1:3] == ["model: none", "selected: qwen3.6-35b-a3b"]
 
 
 def test_status_with_an_unparseable_active_env(home, repo):

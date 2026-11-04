@@ -8,7 +8,7 @@ import os
 import re
 import shutil
 
-from qlm import pins, profiles, service
+from qlm import pins, profiles, selection, service
 
 CMAKE_FLAGS = (
     "-DGGML_CUDA=ON",
@@ -68,7 +68,7 @@ def run(ctx, rebuild=False):
         _write_unit(ctx)
         _link_entry_point(ctx)
         _write_private_files(ctx)
-    except _Stop as stop:
+    except (_Stop, service.Stop) as stop:
         return ctx.fail(stop.what, stop.todo)
     except OSError as e:
         return ctx.fail(f"file error: {e}", "Nothing after this step was changed; fix the cause and run qlm install again")
@@ -257,7 +257,10 @@ def _write_private_files(ctx):
         if path.exists() and path.stat().st_size == 0:
             raise _Stop(f"{path} is empty", "Delete it and run qlm install again to create a new one")
     if not p.active_env.exists():
-        agent = profiles.load(p.model_profiles_dir("qwen3.8-27b") / "agent.env")
+        model_id = selection.current(ctx)
+        if not p.selection.exists():
+            _create_private(p.selection, f"{model_id}\n")
+        agent = profiles.load(p.model_profiles_dir(model_id) / "agent.env")
         _create_private(p.active_env, agent.render(p.home))
     if not p.api_key.exists():
         _create_private(p.api_key, ctx.env.random_token(32))

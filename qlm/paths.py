@@ -44,6 +44,10 @@ class Paths:
         return self.config_dir / "active.env"
 
     @property
+    def selection(self):
+        return self.config_dir / "model"
+
+    @property
     def bench_backup(self):
         return self.config_dir / "active.env.bench-backup"
 
