@@ -1,5 +1,5 @@
 [Unit]
-Description=llama-server for Qwen3.8-27B (qlm)
+Description=llama-server for the selected qlm model
 StartLimitIntervalSec=120
 StartLimitBurst=3
 

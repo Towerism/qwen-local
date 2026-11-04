@@ -1,4 +1,4 @@
-"""`qlm profile use`, `start`, `stop`, `status` and `logs`: the server's systemd user unit and its health.
+"""`qlm use`, `profile use`, `start`, `stop`, `status` and `logs`: the server's systemd user unit and its health.
 
 The VRAM check before every start compares free video memory with the profile's `vram_gib`
 plus 0.5 GiB (docs/architecture.md). A start that doesn't reach a healthy server is stopped,
@@ -9,7 +9,7 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
-from qlm import files, profiles
+from qlm import files, pins, profiles, selection
 from qlm.system import SERVER, ServerUnreachable
 
 UNIT = "qlm-server"
@@ -98,10 +98,17 @@ def active_profile(ctx):
         raise Stop(f"{p.active_env} doesn't parse: {e}", "Run qlm profile use agent") from None
 
 
+def model_profiles(ctx, model_id):
+    return profiles.load_all(ctx.paths.model_profiles_dir(model_id))
+
+
 def active_profile_name(ctx):
-    """The profile whose rendering active.env equals, or "custom"."""
-    text = ctx.paths.active_env.read_text() if ctx.paths.active_env.exists() else None
-    for name, profile in profiles.load_all(ctx.paths.profiles_dir).items():
+    """The profile of active.env's own model whose rendering active.env equals, or "custom"."""
+    model_id = selection.active_alias(ctx)
+    if model_id not in pins.model_ids():
+        return "custom"
+    text = ctx.paths.active_env.read_text()
+    for name, profile in model_profiles(ctx, model_id).items():
         if profile.render(ctx.paths.home) == text:
             return name
     return "custom"
@@ -249,7 +256,7 @@ def preflight(ctx, check_port=True):
     if b"\r" in p.api_key.read_bytes():  # read_text would turn \r\n into \n and hide it
         ctx.warn(
             f"warning: {p.api_key} contains a carriage return; llama-server keeps it as part of the key, "
-            "so requests from qlm and Con will be refused"
+            "so requests from qlm and other clients will be refused"
         )
     missing = missing_files(profile.settings)
     if missing:
@@ -261,7 +268,40 @@ def preflight(ctx, check_port=True):
     return profile
 
 
-def start(ctx):
+def start(ctx, name=None):
+    """Start the server with the selected model's `name` profile, or with active.env when it follows the selection."""
+    p = ctx.paths
+    if name is None:
+        name = _profile_for_selection(ctx)
+    if name is not None:
+        before = p.active_env.read_bytes() if p.active_env.exists() else None
+        profile_use(ctx, name)
+        if p.active_env.read_bytes() != before and unit_state(ctx).running:
+            return 0  # profile_use restarted the running server with the new profile and waited until it was ready
+    return _start(ctx)
+
+
+def _profile_for_selection(ctx):
+    """The profile plain qlm start renders first, or None when active.env already follows the selection.
+
+    A missing active.env, or a stock profile of another model, becomes the selected model's profile
+    of the same name (or agent). A custom profile of another model is never overwritten.
+    """
+    p = ctx.paths
+    model_id = selection.current(ctx)
+    alias = selection.active_alias(ctx)
+    if alias == model_id or (p.active_env.exists() and alias not in pins.model_ids()):
+        return None  # active.env is this model's, or one qlm can't place; start it as it is
+    previous = active_profile_name(ctx)
+    if p.active_env.exists() and previous == "custom":
+        raise Stop(
+            f"active.env is a custom profile for {alias}, but {model_id} is selected",
+            f"Run qlm start agent to replace it, or qlm use {alias}",
+        )
+    return previous if previous in model_profiles(ctx, model_id) else "agent"
+
+
+def _start(ctx):
     t0 = ctx.clock.now()
     state = unit_state(ctx)
     name = active_profile_name(ctx)
@@ -307,9 +347,10 @@ def bring_up(ctx, restart):
     return True
 
 
-def profile_use(ctx, name):
+def profile_use(ctx, name, model_id=None):
     p = ctx.paths
-    profile = profiles.load(p.profiles_dir / f"{name}.env")
+    leftover_bench_backup(ctx)
+    profile = profiles.load(p.model_profiles_dir(model_id or selection.current(ctx)) / f"{name}.env")
     text = profile.render(p.home)
     missing = missing_files(profiles.parse(name, text).settings)
     if missing:
@@ -336,6 +377,47 @@ def profile_use(ctx, name):
     if ready is None:
         _give_up(ctx, t0, f"The {name} profile didn't start. Go back with {back}")
     _report_ready(ctx, t0, ready, name)
+    return 0
+
+
+def use(ctx, model_id):
+    """Select a model and render its profile into active.env, restarting a running server.
+
+    The selection is saved only once the profile is in place, except when the model's files are
+    missing: then only the selection is saved, so qlm fetch knows what to fetch.
+    """
+    p = ctx.paths
+    leftover_bench_backup(ctx)
+    try:
+        selected = selection.current(ctx)
+    except Stop:
+        selected = None  # an unreadable selection is what qlm use replaces
+    if selected == model_id and selection.active_alias(ctx) == model_id:
+        ctx.say(f"{model_id} is already selected.")
+        return 0
+    available = model_profiles(ctx, model_id)
+    previous = active_profile_name(ctx)
+    name = previous if previous in available else "agent"
+    replacing_custom = p.active_env.exists() and previous == "custom"
+    missing = missing_files(profiles.parse(name, available[name].render(p.home)).settings)
+    if missing:
+        selection.save(ctx, model_id)
+        raise Stop(
+            f"{model_id} is selected but its files are missing: " + ", ".join(path for _, path in missing),
+            f"{_fetch_hint(missing)}, then qlm start {name}",
+        )
+    if not p.selection.exists():
+        selection.save(ctx, selected)  # else a failed restart leaves active.env, and so the selection, on model_id
+    before = p.active_env.read_bytes() if p.active_env.exists() else None
+    profile_use(ctx, name, model_id)
+    selection.save(ctx, model_id)
+    if replacing_custom:
+        ctx.say(f"Replaced the custom active.env with the {name} profile of {model_id}.")
+    if p.active_env.read_bytes() == before and not unit_state(ctx).running:
+        # active.env already held this profile, as a failed restart in qlm use leaves it, so nothing said so yet
+        ctx.say(f"{model_id} is selected. qlm-server is stopped; start it with qlm start.")
+        return 0
+    ctx.say(f"{model_id} is selected.")
     return 0
 
 
@@ -387,6 +469,14 @@ def status(ctx):
     ready = state.running and health_status(ctx) == 200
     label = "running" if ready else "loading" if state.running else STATE_LABELS.get(state.active, state.active)
     ctx.say(f"state: {label}")
+    alias = selection.active_alias(ctx)
+    ctx.say(f"model: {alias or ('unknown' if ctx.paths.active_env.exists() else 'none')}")
+    try:
+        selected = selection.current(ctx)
+    except Stop:
+        selected = f"invalid ({ctx.paths.selection} names {ctx.paths.selection.read_text().strip()!r})"
+    if selected != alias:
+        ctx.say(f"selected: {selected}")
     try:
         profile = active_profile(ctx)
         ctx.say(f"profile: {active_profile_name(ctx)}")

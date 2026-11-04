@@ -4,7 +4,7 @@ import stat
 import pytest
 
 from qlm import cli, install, pins, profiles
-from tests.fakes import FakeRunner, fail, make_ctx, ok
+from tests.fakes import FakeRunner, fail, make_ctx, ok, select_model
 
 TAG = pins.LLAMA_TAG
 COMMIT = pins.LLAMA_COMMIT
@@ -225,7 +225,33 @@ def test_profile_and_key_are_created_once_with_private_modes(home, repo):
     assert mode(m.paths.config_dir) == 0o700
     assert m.paths.api_key.read_bytes() == key
     assert m.paths.active_env.read_bytes() == env
-    assert env.decode() == profiles.load(repo / "profiles/agent.env").render(home)
+
+
+def test_a_fresh_install_selects_the_default_model_and_writes_its_agent_profile(home, repo):
+    m = Machine(home, repo)
+    assert m.install()[0] == 0
+    assert m.paths.selection.read_text() == pins.DEFAULT_MODEL + "\n" == "qwen3.6-35b-a3b\n"
+    assert mode(m.paths.selection) == 0o600
+    expected = profiles.load(repo / "profiles/qwen3.6-35b-a3b/agent.env").render(home)
+    assert m.paths.active_env.read_text() == expected
+
+
+def test_install_keeps_an_existing_27b_active_env_and_writes_no_selection(home, repo):
+    m = Machine(home, repo)
+    m.paths.config_dir.mkdir(parents=True, mode=0o700)
+    existing = profiles.load(repo / "profiles/qwen3.8-27b/agent.env").render(home)
+    m.paths.active_env.write_text(existing)
+    assert m.install()[0] == 0
+    assert m.paths.active_env.read_text() == existing
+    assert not m.paths.selection.exists()
+
+
+def test_install_seeds_active_env_from_a_model_selected_before_it(home, repo):
+    m = Machine(home, repo)
+    select_model(home, "qwen3.8-27b")
+    assert m.install()[0] == 0
+    assert m.paths.selection.read_text() == "qwen3.8-27b\n"
+    assert m.paths.active_env.read_text() == profiles.load(repo / "profiles/qwen3.8-27b/agent.env").render(home)
 
 
 def test_existing_config_dir_is_tightened_to_0700(home, repo):
@@ -334,6 +360,18 @@ def test_copy_failure_ends_with_a_summary_line(home, repo, monkeypatch):
     last = ctx.err.getvalue().rstrip().splitlines()[-1]
     assert last.startswith("qlm: ") and "No space left" in last
 
+
+def test_a_profile_that_does_not_parse_ends_with_a_summary_line(home, repo, tmp_path):
+    import shutil
+
+    copy = tmp_path / "repo"
+    shutil.copytree(repo / "profiles", copy / "profiles")
+    (copy / "profiles/qwen3.8-27b/long.env").write_text("# qlm: vram_gib=20\nnonsense\n")
+    ctx = make_ctx(home, copy, runner=FakeRunner({}))
+    assert cli.main(["install"], ctx) == 1
+    last = ctx.err.getvalue().rstrip().splitlines()[-1]
+    assert last.startswith("qlm: ") and "long line 2: expected LLAMA_ARG_<NAME>=<value>" in last
+    assert ctx.runner.calls == []
 
 def test_current_that_is_a_real_directory_fails_cleanly(home, repo):
     m = Machine(home, repo)

@@ -1,12 +1,19 @@
-import os
+import pytest
 
-from qlm import cli, doctor
-from tests.fakes import FakeEnv, FakeRunner, fail, make_ctx, ok
+from qlm import cli, profiles
+from tests.fakes import FakeEnv, FakeRunner, fail, make_ctx, ok, select_model, small_pins
 
 GPU = ("nvidia-smi", "--query-gpu=name,compute_cap,memory.total,memory.used,driver_version",
        "--format=csv,noheader,nounits")
 APPS = ("nvidia-smi", "--query-compute-apps=pid,process_name,used_memory", "--format=csv,noheader,nounits")
 OLLAMA_HEADER = "NAME    ID    SIZE    PROCESSOR    CONTEXT    RUNNER    UNTIL\n"
+
+
+@pytest.fixture
+def home(home):
+    """The numbers below fit the 27B agent profile, so these homes select 27B."""
+    select_model(home, "qwen3.8-27b")
+    return home
 
 
 def healthy_runner(overrides=None):
@@ -33,7 +40,7 @@ def run_doctor(home, repo, runner=None, env=None):
 
 
 def line_for(lines, name):
-    matches = [l for l in lines if f" {name}:" in l]
+    matches = [line for line in lines if f" {name}:" in line]
     assert len(matches) == 1, (name, lines)
     return matches[0]
 
@@ -41,19 +48,8 @@ def line_for(lines, name):
 def test_healthy_machine_passes_every_check(home, repo):
     code, lines, _ = run_doctor(home, repo)
     assert code == 0
-    assert len(lines) == 12
-    assert all(l.startswith("PASS ") for l in lines), lines
-
-
-def test_dashed_con_provider_key_fails(home, repo):
-    conf = home / ".config/con/con.conf"
-    conf.parent.mkdir(parents=True)
-    conf.write_text('con.agent.provider = "anthropic"\n  con.agent.providers.openai-compatible.base_url = "x"\n')
-
-    code, lines, _ = run_doctor(home, repo)
-
-    assert code == 1
-    assert line_for(lines, "con config").startswith("FAIL ")
+    assert len(lines) == 11
+    assert all(line.startswith("PASS ") for line in lines), lines
 
 
 def test_low_vram_warns_and_names_each_gpu_process(home, repo):
@@ -69,6 +65,23 @@ def test_low_vram_warns_and_names_each_gpu_process(home, repo):
     assert "/usr/bin/compositor (331 MiB)" in vram
     assert "/usr/lib/browser --flag=a,b (2100 MiB)" in vram
 
+
+def test_a_fresh_home_checks_vram_for_the_35b_agent_profile(tmp_path, repo):
+    fresh = tmp_path / "fresh"
+    fresh.mkdir()
+    agent = profiles.load(repo / "profiles/qwen3.6-35b-a3b/agent.env")
+    _, lines, _ = run_doctor(fresh, repo)
+    assert f"{agent.vram_gib + 0.5:.1f} GiB needed by the agent profile" in line_for(lines, "vram")
+
+
+def test_a_selection_naming_an_unknown_model_fails_one_check_and_the_others_still_run(home, repo):
+    select_model(home, "qwen9-1t")
+    code, lines, _ = run_doctor(home, repo)
+    assert code == 1
+    assert [line for line in lines if not line.startswith("PASS ")] == [line_for(lines, "selected model")]
+    assert line_for(lines, "selected model").startswith("FAIL ")
+    assert "'qwen9-1t'" in line_for(lines, "selected model") and "qlm use <model>" in line_for(lines, "selected model")
+    assert len(lines) == 10
 
 def test_doctor_changes_no_files(home, repo):
     (home / "existing").write_text("x")
@@ -108,7 +121,7 @@ def test_missing_nvidia_smi_fails_gpu_checks_but_others_still_run(home, repo):
     del runner.which_map["nvidia-smi"]
     code, lines, _ = run_doctor(home, repo, runner=runner)
     assert code == 1
-    assert len(lines) == 12
+    assert len(lines) == 11
     for name in ("gpu", "compute capability", "vram"):
         assert line_for(lines, name).startswith("FAIL "), name
     assert line_for(lines, "git and cmake").startswith("PASS ")
@@ -157,9 +170,7 @@ def test_local_bin_missing_from_path_warns_with_the_line_to_add(home, repo):
 
 
 def test_disk_space_counts_files_already_present(home, repo, monkeypatch):
-    from tests.fakes import small_pins
-
-    files, contents, _ = small_pins(monkeypatch)
+    files, contents, _ = small_pins(monkeypatch, "qwen3.8-27b")
     models = home / ".local/share/qlm/models"
     models.mkdir(parents=True)
     (models / files[0].local_name).write_bytes(contents[files[0].local_name])
@@ -203,7 +214,7 @@ def test_unparseable_nvidia_smi_output_fails_gpu_checks_without_crashing(home, r
     runner = healthy_runner({GPU: ok("NVIDIA GeForce RTX 4090, 8.9, 24564, [N/A], 615.78.08\n")})
     code, lines, _ = run_doctor(home, repo, runner=runner)
     assert code == 1
-    assert len(lines) == 12
+    assert len(lines) == 11
     assert "unparseable" in line_for(lines, "gpu")
     assert line_for(lines, "vram").startswith("FAIL ")
 

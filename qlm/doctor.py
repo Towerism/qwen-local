@@ -3,7 +3,7 @@
 import os
 from dataclasses import dataclass
 
-from qlm import pins, profiles
+from qlm import pins, profiles, selection, service
 
 GIB = 2**30
 MIB = 2**20
@@ -11,7 +11,6 @@ BUILD_SPACE = 6 * GIB
 MIN_RAM = 32 * GIB
 PORT = 9931
 HOST = "127.0.0.1"
-CON_BAD_KEY = "con.agent.providers.openai-compatible."
 TIMEOUT_S = 10
 
 
@@ -26,6 +25,11 @@ class Check:
 
 
 def run(ctx):
+    try:
+        model_id = selection.current(ctx)
+    except service.Stop as stop:
+        model_id = None  # disk space and vram depend on the model, so this one FAIL takes their place
+        unselected = Check("FAIL", "selected model", f"{stop.what}; disk space and vram need it. {stop.todo}")
     facts = _Facts(ctx)
     checks = [
         _gpu(facts),
@@ -33,13 +37,12 @@ def run(ctx):
         _nvcc(ctx),
         _host_compiler(ctx),
         _git_and_cmake(ctx),
-        _disk(ctx),
+        _disk(ctx, model_id) if model_id else unselected,
         _ram(ctx),
         _port(ctx, facts),
         _ollama(ctx),
-        _vram(ctx, facts),
+        *([_vram(ctx, facts, model_id)] if model_id else []),
         _path(ctx),
-        _con(ctx),
     ]
     for c in checks:
         ctx.say(c.line())
@@ -107,7 +110,7 @@ def _nvcc(ctx):
     if not path:
         return Check("FAIL", "nvcc", "not found on PATH or in /opt/cuda/bin; install the cuda package")
     r = _run(ctx, [path, "--version"])
-    release = next((l.split("release", 1)[1].strip() for l in r.stdout.splitlines() if "release" in l), "unknown version")
+    release = next((line.split("release", 1)[1].strip() for line in r.stdout.splitlines() if "release" in line), "unknown version")
     return Check("PASS", "nvcc", f"{path}, release {release}")
 
 
@@ -126,9 +129,9 @@ def _git_and_cmake(ctx):
     return Check("PASS", "git and cmake", "found")
 
 
-def _missing_model_bytes(ctx):
+def _missing_model_bytes(ctx, model_id):
     missing = 0
-    for f in pins.files():
+    for f in pins.files(pins.model(model_id)):
         final = ctx.paths.models / f.local_name
         part = ctx.paths.models / (f.local_name + ".part")
         if final.exists() and final.stat().st_size == f.size:
@@ -138,8 +141,8 @@ def _missing_model_bytes(ctx):
     return missing
 
 
-def _disk(ctx):
-    need = _missing_model_bytes(ctx) + BUILD_SPACE
+def _disk(ctx, model_id):
+    need = _missing_model_bytes(ctx, model_id) + BUILD_SPACE
     free = ctx.env.disk_free(ctx.paths.home)
     detail = f"{free / GIB:.1f} GiB free, {need / GIB:.1f} GiB needed"
     return Check("PASS" if free >= need else "FAIL", "disk space", detail)
@@ -166,19 +169,19 @@ def _ollama(ctx):
     r = _run(ctx, ["ollama", "ps"])
     if r.code != 0:
         return Check("PASS", "ollama", "daemon not running")
-    on_gpu = [l.split()[0] for l in r.stdout.splitlines()[1:] if l.strip() and "GPU" in l]
+    on_gpu = [line.split()[0] for line in r.stdout.splitlines()[1:] if line.strip() and "GPU" in line]
     if on_gpu:
         names = ", ".join(on_gpu)
         return Check("WARN", "ollama", f"model on the GPU: {names}; free it with: ollama stop {on_gpu[0]}")
     return Check("PASS", "ollama", "no model on the GPU")
 
 
-def _vram(ctx, f):
+def _vram(ctx, f, model_id):
     if f.gpu is None:
         return Check("FAIL", "vram", f.gpu_problem)
     if f.server_pid is not None:
         return Check("PASS", "vram", "server running")
-    agent = profiles.load(ctx.paths.profiles_dir / "agent.env")
+    agent = profiles.load(ctx.paths.model_profiles_dir(model_id) / "agent.env")
     need_mib = agent.vram_gib * 1024 + 512
     free_mib = f.gpu["total"] - f.gpu["used"]
     detail = f"{free_mib / 1024:.1f} GiB free, {need_mib / 1024:.1f} GiB needed by the agent profile"
@@ -193,16 +196,3 @@ def _path(ctx):
     if any(entry and os.path.normpath(entry) == wanted for entry in ctx.env.path):
         return Check("PASS", "~/.local/bin on PATH", "yes")
     return Check("WARN", "~/.local/bin on PATH", 'no; add to ~/.zshrc: export PATH="$HOME/.local/bin:$PATH"')
-
-
-def _con(ctx):
-    conf = ctx.paths.con_conf
-    if not conf.exists():
-        return Check("PASS", "con config", "Con config not found")
-    for n, line in enumerate(conf.read_text(errors="replace").splitlines(), start=1):
-        if line.lstrip().startswith(CON_BAD_KEY):
-            return Check(
-                "FAIL", "con config",
-                f"line {n} uses {CON_BAD_KEY}*, which stops Con loading its config; rename it to con.agent.providers.openaicompatible.*",
-            )
-    return Check("PASS", "con config", "no invalid provider keys")

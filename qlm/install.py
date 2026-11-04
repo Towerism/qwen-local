@@ -8,7 +8,7 @@ import os
 import re
 import shutil
 
-from qlm import pins, profiles, service
+from qlm import pins, profiles, selection, service
 
 CMAKE_FLAGS = (
     "-DGGML_CUDA=ON",
@@ -54,9 +54,9 @@ def _spec_type_mentions_draft_mtp(text):
 def run(ctx, rebuild=False):
     tag = pins.LLAMA_TAG
     p = ctx.paths
-    required = profiles.all_setting_names(p.profiles_dir)
     bin_dir = p.tag_dir(tag) / "bin"
     try:
+        required = profiles.all_setting_names(p.profiles_dir)
         built = False
         if rebuild or not _installed_and_valid(ctx, bin_dir / "llama-server", required):
             with _Log(ctx, "install") as log:
@@ -68,8 +68,10 @@ def run(ctx, rebuild=False):
         _write_unit(ctx)
         _link_entry_point(ctx)
         _write_private_files(ctx)
-    except _Stop as stop:
+    except (_Stop, service.Stop) as stop:
         return ctx.fail(stop.what, stop.todo)
+    except profiles.ProfileError as e:
+        return ctx.fail(f"a profile in {p.profiles_dir} doesn't parse: {e}", "Fix it and run qlm install again")
     except OSError as e:
         return ctx.fail(f"file error: {e}", "Nothing after this step was changed; fix the cause and run qlm install again")
     if (built or switched) and _server_pid(ctx):
@@ -257,7 +259,10 @@ def _write_private_files(ctx):
         if path.exists() and path.stat().st_size == 0:
             raise _Stop(f"{path} is empty", "Delete it and run qlm install again to create a new one")
     if not p.active_env.exists():
-        agent = profiles.load(p.profiles_dir / "agent.env")
+        model_id = selection.current(ctx)
+        if not p.selection.exists():
+            _create_private(p.selection, f"{model_id}\n")
+        agent = profiles.load(p.model_profiles_dir(model_id) / "agent.env")
         _create_private(p.active_env, agent.render(p.home))
     if not p.api_key.exists():
         _create_private(p.api_key, ctx.env.random_token(32))

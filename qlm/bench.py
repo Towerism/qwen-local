@@ -1,6 +1,6 @@
-"""`qlm bench [--quick]`: measure the running server as Con uses it (docs/architecture.md, "What qlm bench measures").
+"""`qlm bench [--quick]`: measure the running server as a coding agent uses it (docs/architecture.md, "What qlm bench measures").
 
-Prompt processing, generation, MTP draft acceptance, prompt-cache reuse in a Con-shaped session, and
+Prompt processing, generation, MTP draft acceptance, prompt-cache reuse in an agent-shaped session, and
 peak VRAM, with MTP on and off. To measure with MTP off, the profile is swapped for a copy without the
 LLAMA_ARG_SPEC_* lines and always put back, whatever ends the run. Results go to a JSON file and are
 compared with the last comparable run. The numbers never fail the command; only a measurement that
@@ -18,8 +18,8 @@ import threading
 from qlm import files, interrupts, service, smoke
 from qlm.system import SERVER, ServerUnreachable
 
-WARNING = ("Note: qlm bench replaces Con's cached prompt and, in a full run with MTP on, restarts the server "
-           "twice. Don't use Con until it finishes.")
+WARNING = ("Note: qlm bench replaces the server's cached prompt and, in a full run with MTP on, restarts the server "
+           "twice. Don't send it other requests until it finishes.")
 INTERRUPTED = "interrupted; nothing was changed"
 CHAT_TIMEOUT_S = 300
 TOKENIZE_TIMEOUT_S = 30
@@ -451,6 +451,7 @@ def _run(ctx, quick):
         "time": ctx.clock.now().isoformat(),
         "quick": quick,
         "profile": name,
+        "model": profile.settings.get("LLAMA_ARG_ALIAS"),
         "active_env_sha256": hashlib.sha256(original).hexdigest(),
         "llama_tag": os.path.basename(os.readlink(p.llama_current)) if p.llama_current.is_symlink() else None,
         "server_build": client.build,
@@ -546,6 +547,8 @@ def _earlier(ctx, record):
             ctx.warn(f"warning: skipped {path.name}, which isn't a bench result")
             continue
         if data.get("quick") != record["quick"] or data.get("profile") != record["profile"]:
+            continue
+        if data.get("model", "qwen3.8-27b") != record["model"]:  # results from before the model field are 27B's
             continue
         if best is None or key > best[0]:
             best = (key, path, data)

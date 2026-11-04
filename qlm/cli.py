@@ -16,33 +16,40 @@ class _Parser(argparse.ArgumentParser):
 
 
 def build_parser():
-    parser = _Parser(prog="qlm", description="Set up and run Qwen3.8-27B with llama-server for Con.")
+    parser = _Parser(prog="qlm", description="Set up and run a local model with llama-server.")
     sub = parser.add_subparsers(dest="command", metavar="<command>", parser_class=_Parser)
     sub.required = True
     sub.add_parser("doctor", help="check this machine before installing (read-only)")
     install = sub.add_parser("install", help="build llama.cpp and install the service, profile and API key")
     install.add_argument("--tag", default=pins.LLAMA_TAG, help=f"llama.cpp tag; only the pinned {pins.LLAMA_TAG} (use qlm update for others)")
     install.add_argument("--rebuild", action="store_true", help="build again even if this tag is installed")
-    fetch = sub.add_parser("fetch", help="download and verify the pinned model files")
+    fetch = sub.add_parser("fetch", help="download and verify the selected model's pinned files")
     fetch.add_argument("--vision", action="store_true", help="also fetch the vision projector")
+    fetch.add_argument("--from", dest="sources", metavar="PATH", action="append", default=[],
+                       help="link this local copy instead of downloading it, once it matches a pin (repeatable)")
+    use_model = sub.add_parser(
+        "use",
+        help="select the model to run; restarts the server if it is running",
+        description=(
+            "Select a catalog model and save the choice in ~/.config/qlm/model. When its files are present, "
+            "the same profile as now (or agent) is written to active.env, and a running server restarts with it. "
+            "When they are missing, only the choice is saved: run qlm fetch, then qlm start. "
+            "If the restart fails, the server is stopped and active.env keeps the new model's profile while the "
+            "previous model stays selected: qlm start goes back to the selected model, and qlm use selects the "
+            "new one again without starting it, so run qlm start after it."
+        ),
+    )
+    use_model.add_argument("model", metavar="<model>", help="one of: " + ", ".join(pins.model_ids()))
     profile = sub.add_parser("profile", help="switch the server profile")
     profile_sub = profile.add_subparsers(dest="action", metavar="<action>", parser_class=_Parser)
     profile_sub.required = True
     use = profile_sub.add_parser("use", help="make a profile active; restarts the server if it is running")
-    use.add_argument("name", help="a profile in profiles/, such as agent, long or vision")
-    sub.add_parser("start", help="start the server after checking VRAM, and wait until it is ready")
+    use.add_argument("name", help="a profile of the selected model, such as agent or long")
+    start = sub.add_parser("start", help="start the server after checking VRAM, and wait until it is ready")
+    start.add_argument("name", nargs="?", help="switch to this profile of the selected model first")
     sub.add_parser("stop", help="stop the server")
     sub.add_parser("status", help="show the server's state, profile, VRAM and context use")
     sub.add_parser("smoke", help="run eight API checks against the running server")
-    con = sub.add_parser("con", help="show, write or undo the Con settings for the local server")
-    con_mode = con.add_mutually_exclusive_group(required=True)
-    con_mode.add_argument("--print", dest="mode", action="store_const", const="print", help="show what --apply would do")
-    con_mode.add_argument("--apply", dest="mode", action="store_const", const="apply", help="write the settings")
-    con_mode.add_argument("--revert", dest="mode", action="store_const", const="revert", help="restore the last backup")
-    suggest = sub.add_parser("suggest", help="turn Con's suggestions on (CPU-only Ollama model) or off")
-    suggest_mode = suggest.add_mutually_exclusive_group(required=True)
-    suggest_mode.add_argument("--enable", dest="enable", action="store_true", default=None, help="turn suggestions on")
-    suggest_mode.add_argument("--disable", dest="enable", action="store_false", help="turn suggestions off")
     bench = sub.add_parser("bench", help="measure speed, MTP acceptance, cache reuse and peak VRAM of the running server")
     bench.add_argument("--quick", action="store_true", help="a short run: one prompt size, one generation, no restarts")
     update = sub.add_parser("update", help="build a newer llama.cpp tag, switch to it, and switch back if smoke fails")
@@ -118,24 +125,22 @@ def _dispatch(args, ctx):
     if args.command == "fetch":
         from qlm import fetch
 
-        return fetch.run(ctx, vision=args.vision)
-    if args.command == "profile":
-        from qlm import profiles, service
+        return fetch.run(ctx, vision=args.vision, sources=args.sources)
+    if args.command == "use":
+        from qlm import service
 
-        names = sorted(profiles.load_all(ctx.paths.profiles_dir))
-        if args.name not in names:
-            print(f"qlm: no profile named {args.name!r}. Choose one of: {', '.join(names)}.", file=ctx.err)
+        if args.model not in pins.model_ids():
+            print(f"qlm: no model named {args.model!r}. Choose one of: {', '.join(pins.model_ids())}.", file=ctx.err)
             return 2
-        return service.run(ctx, service.profile_use, name=args.name)
-    if args.command == "con":
-        from qlm import con, service
+        return service.run(ctx, service.use, model_id=args.model)
+    if args.command in ("profile", "start") and args.name is not None:
+        from qlm import service
 
-        command = {"print": con.print_plan, "apply": con.apply, "revert": con.revert}[args.mode]
-        return service.run(ctx, command)
-    if args.command == "suggest":
-        from qlm import con, service
-
-        return service.run(ctx, con.suggest, enable=args.enable)
+        code = _check_profile_name(ctx, args.name)
+        if code is not None:
+            return code
+        if args.command == "profile":
+            return service.run(ctx, service.profile_use, name=args.name)
     if args.command == "bench":
         from qlm import bench
 
@@ -157,5 +162,26 @@ def _dispatch(args, ctx):
 
         if args.command == "logs":
             return service.logs(ctx, lines=args.lines, follow=args.follow)
+        if args.command == "start":
+            return service.run(ctx, service.start, name=args.name)
         return service.run(ctx, getattr(service, args.command))
+    return 2
+
+
+def _check_profile_name(ctx, name):
+    """None when the selected model has this profile, else the exit code after saying why."""
+    from qlm import profiles, selection, service
+
+    try:
+        model_id = selection.current(ctx)
+    except service.Stop as stop:
+        return ctx.fail(stop.what, stop.todo)
+    catalog = profiles.load_catalog(ctx.paths.profiles_dir)
+    names = sorted(catalog[model_id])
+    if name in names:
+        return None
+    if any(name in other for other in catalog.values()):
+        print(f"qlm: the {name} profile is not available for {model_id}. Choose one of: {', '.join(names)}.", file=ctx.err)
+    else:
+        print(f"qlm: no profile named {name!r}. Choose one of: {', '.join(names)}.", file=ctx.err)
     return 2

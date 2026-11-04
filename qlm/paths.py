@@ -44,6 +44,10 @@ class Paths:
         return self.config_dir / "active.env"
 
     @property
+    def selection(self):
+        return self.config_dir / "model"
+
+    @property
     def bench_backup(self):
         return self.config_dir / "active.env.bench-backup"
 
@@ -64,10 +68,6 @@ class Paths:
         return self.state_dir / "logs"
 
     @property
-    def backups(self):
-        return self.state_dir / "backups"
-
-    @property
     def bench(self):
         return self.state_dir / "bench"
 
@@ -80,12 +80,11 @@ class Paths:
         return self.local_bin / "qlm"
 
     @property
-    def con_conf(self):
-        return self.home / ".config/con/con.conf"
-
-    @property
     def profiles_dir(self):
         return self.repo / "profiles"
+
+    def model_profiles_dir(self, model_id):
+        return self.profiles_dir / model_id
 
     @property
     def unit_template(self):

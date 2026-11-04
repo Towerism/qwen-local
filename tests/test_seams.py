@@ -148,13 +148,6 @@ def test_passthrough_reports_a_missing_program_as_127(monkeypatch):
     assert Runner().passthrough(["nope"]) == 127
 
 
-def test_xdg_config_home_comes_from_the_environment(monkeypatch):
-    monkeypatch.setenv("XDG_CONFIG_HOME", "/x/cfg")
-    assert Env().xdg_config_home() == "/x/cfg"
-    monkeypatch.delenv("XDG_CONFIG_HOME")
-    assert Env().xdg_config_home() is None
-
-
 class _FakePopen:
     """Stands in for subprocess.Popen: stdout yields fixed lines, and terminate ends the process."""
 

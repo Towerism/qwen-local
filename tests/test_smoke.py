@@ -16,8 +16,10 @@ KEY = "k" * 43
 FIXTURES = REPO / "tests/fixtures/server"
 
 
-def fixture(name):
-    return json.loads((FIXTURES / f"{name}.json").read_text())
+def fixture(name, model="qwen3.8-27b"):
+    """A recorded reply; for another model, its id replaces the 27B id the fixtures were recorded with."""
+    data = json.loads((FIXTURES / f"{name}.json").read_text())
+    return json.loads(json.dumps(data).replace('"qwen3.8-27b"', json.dumps(model)))
 
 
 def classify(body):
@@ -34,7 +36,7 @@ def classify(body):
     return "auth"
 
 
-def make_server(**overrides):
+def make_server(model="qwen3.8-27b", **overrides):
     """A FakeServer that passes all eight checks; each keyword replaces one check's reply.
 
     Override keys: health, models, tool_call, tool_loop, messages, thinking, mtp, auth. A value is a
@@ -42,12 +44,12 @@ def make_server(**overrides):
     """
     answers = {
         "health": reply(200, {"status": "ok"}),
-        "models": reply(200, fixture("models")),
-        "tool_call": reply(200, fixture("tool_call")),
-        "tool_loop": reply(200, fixture("tool_loop")),
-        "messages": reply(200, fixture("messages_tool_use")),
-        "thinking": reply(200, fixture("thinking")),
-        "mtp": reply(200, fixture("mtp")),
+        "models": reply(200, fixture("models", model)),
+        "tool_call": reply(200, fixture("tool_call", model)),
+        "tool_loop": reply(200, fixture("tool_loop", model)),
+        "messages": reply(200, fixture("messages_tool_use", model)),
+        "thinking": reply(200, fixture("thinking", model)),
+        "mtp": reply(200, fixture("mtp", model)),
         "auth": reply(401, {"error": {"message": "Invalid API Key", "type": "authentication_error", "code": 401}}),
     }
     for name, value in overrides.items():
@@ -75,26 +77,53 @@ def make_server(**overrides):
     })
 
 
-def run_smoke(home, repo, server, profile="agent"):
-    install(home, repo, profile=profile, key=KEY)
+def run_smoke(home, repo, server, profile="agent", model="qwen3.8-27b"):
+    install(home, repo, profile=profile, key=KEY, model=model)
     ctx = make_ctx(home, repo, runner=FakeRunner(), http=server, clock=FakeClock(advance=True))
     code = cli.main(["smoke"], ctx)
     return code, ctx
 
 
 def lines(ctx):
-    return [l for l in ctx.out.getvalue().splitlines() if l.split(" ", 1)[0] in ("PASS", "FAIL", "SKIP")]
+    return [line for line in ctx.out.getvalue().splitlines() if line.split(" ", 1)[0] in ("PASS", "FAIL", "SKIP")]
 
 
 def status_of(ctx, number):
-    return next(l for l in lines(ctx) if l.split()[1] == str(number)).split()[0]
+    return next(line for line in lines(ctx) if line.split()[1] == str(number)).split()[0]
 
 
 def test_a_healthy_server_passes_all_eight_checks(home, repo):
     code, ctx = run_smoke(home, repo, make_server())
     assert code == 0
-    assert [l.split()[:2] for l in lines(ctx)] == [["PASS", str(n)] for n in range(1, 9)]
-    assert "Con's cached prompt" in ctx.out.getvalue().splitlines()[0]
+    assert [line.split()[:2] for line in lines(ctx)] == [["PASS", str(n)] for n in range(1, 9)]
+    assert "replace any cached prompt in the server's single slot" in ctx.out.getvalue().splitlines()[0]
+
+
+@pytest.mark.parametrize("model", ["qwen3.8-27b", "qwen3.6-35b-a3b"])
+def test_smoke_asks_for_the_model_the_active_profile_serves(home, repo, model):
+    server = make_server(model)
+    code, ctx = run_smoke(home, repo, server, model=model)
+    assert code == 0, ctx.out.getvalue() + ctx.err.getvalue()
+    assert f"{model} listed" in next(line for line in lines(ctx) if line.split()[1] == "2")
+    named = [r["json"]["model"] for r in server.requests if r["json"] and "model" in r["json"]]
+    assert named and set(named) == {model}
+
+
+def test_a_server_serving_another_model_fails_the_models_check(home, repo):
+    code, ctx = run_smoke(home, repo, make_server("qwen3.8-27b"), model="qwen3.6-35b-a3b")
+    assert code == 1
+    assert "qwen3.6-35b-a3b not listed (got qwen3.8-27b)" in next(line for line in lines(ctx) if line.split()[1] == "2")
+
+
+def test_an_active_env_without_an_alias_is_refused(home, repo):
+    p = install(home, repo, key=KEY)
+    p.active_env.write_text("".join(f"{line}\n" for line in p.active_env.read_text().splitlines()
+                                    if not line.startswith("LLAMA_ARG_ALIAS=")))
+    server = make_server()
+    ctx = make_ctx(home, repo, runner=FakeRunner(), http=server, clock=FakeClock(advance=True))
+    assert cli.main(["smoke"], ctx) == 1
+    assert "sets no LLAMA_ARG_ALIAS" in ctx.err.getvalue()
+    assert server.requests == []
 
 
 def test_requests_carry_the_key_the_way_each_api_expects(home, repo):
@@ -166,7 +195,7 @@ def bad_tool_call(arguments=None, calls=True):
 def test_a_wrong_tool_call_fails_and_skips_the_loop(home, repo, body, reason):
     code, ctx = run_smoke(home, repo, make_server(tool_call=body))
     assert code == 1
-    assert status_of(ctx, 3) == "FAIL" and reason in next(l for l in lines(ctx) if l.split()[1] == "3")
+    assert status_of(ctx, 3) == "FAIL" and reason in next(line for line in lines(ctx) if line.split()[1] == "3")
     assert status_of(ctx, 4) == "SKIP"
 
 
@@ -225,7 +254,7 @@ def test_mtp_needs_accepted_draft_tokens(home, repo, timings):
 
 def test_mtp_detail_shows_accepted_out_of_drafted(home, repo):
     code, ctx = run_smoke(home, repo, make_server())
-    assert "232 of 234" in next(l for l in lines(ctx) if l.split()[1] == "7")
+    assert "232 of 234" in next(line for line in lines(ctx) if line.split()[1] == "7")
 
 
 def test_a_server_that_accepts_requests_without_the_key_fails(home, repo):
@@ -238,8 +267,8 @@ def test_errors_and_timeouts_fail_only_their_own_check(home, repo):
     server = make_server(models=reply(500, "boom"), tool_call=ServerUnreachable("timed out after 180 s"))
     code, ctx = run_smoke(home, repo, server)
     assert code == 1
-    assert "HTTP 500" in next(l for l in lines(ctx) if l.split()[1] == "2")
-    assert "timed out after 180 s" in next(l for l in lines(ctx) if l.split()[1] == "3")
+    assert "HTTP 500" in next(line for line in lines(ctx) if line.split()[1] == "2")
+    assert "timed out after 180 s" in next(line for line in lines(ctx) if line.split()[1] == "3")
     assert status_of(ctx, 4) == "SKIP"
     assert [status_of(ctx, n) for n in (5, 6, 7, 8)] == ["PASS"] * 4
     assert "2 models" in ctx.err.getvalue() and "3 tool call" in ctx.err.getvalue()
@@ -249,7 +278,7 @@ def test_a_reply_cut_off_by_the_token_limit_says_so(home, repo):
     body = copy.deepcopy(fixture("thinking"))
     body["choices"][0]["finish_reason"] = "length"
     code, ctx = run_smoke(home, repo, make_server(thinking=body))
-    assert "token limit" in next(l for l in lines(ctx) if l.split()[1] == "6")
+    assert "token limit" in next(line for line in lines(ctx) if line.split()[1] == "6")
 
 
 def test_a_wrong_key_is_explained(home, repo):

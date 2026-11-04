@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from qlm import files, service
 from qlm.system import SERVER, ServerUnreachable
 
-MODEL = "qwen3.8-27b"
 GENERATION_TIMEOUT_S = 180
 OTHER_TIMEOUT_S = 10
 MAX_TOKENS = 4096
@@ -71,8 +70,8 @@ class _Log:
 
 
 class _Client:
-    def __init__(self, ctx, key, log):
-        self.ctx, self.key, self.log = ctx, key, log
+    def __init__(self, ctx, key, log, model):
+        self.ctx, self.key, self.log, self.model = ctx, key, log, model
         self.unauthorized = 0
 
     def call(self, method, path, body=None, auth="bearer", timeout_s=OTHER_TIMEOUT_S, expect=200):
@@ -111,8 +110,8 @@ def _message(reply):
     return message
 
 
-def _chat(prompt_messages, **extra):
-    return {"model": MODEL, "messages": prompt_messages, "max_tokens": MAX_TOKENS, **extra}
+def _chat(model, prompt_messages, **extra):
+    return {"model": model, "messages": prompt_messages, "max_tokens": MAX_TOKENS, **extra}
 
 
 def _openai_tool():
@@ -126,13 +125,13 @@ def _user(text):
 def check_models(client):
     reply = client.call("GET", "/v1/models")
     ids = [m.get("id") for m in reply.get("data", []) if isinstance(m, dict)]
-    if MODEL not in ids:
-        raise CheckFailed(f"{MODEL} not listed (got {', '.join(map(str, ids)) or 'none'})")
-    return f"{MODEL} listed"
+    if client.model not in ids:
+        raise CheckFailed(f"{client.model} not listed (got {', '.join(map(str, ids)) or 'none'})")
+    return f"{client.model} listed"
 
 
 def check_tool_call(client):
-    body = _chat(_user(PROMPT), tools=[_openai_tool()], tool_choice="auto")
+    body = _chat(client.model, _user(PROMPT), tools=[_openai_tool()], tool_choice="auto")
     message = _message(client.call("POST", "/v1/chat/completions", body, timeout_s=GENERATION_TIMEOUT_S))
     calls = [c for c in message.get("tool_calls") or [] if c.get("function", {}).get("name") == TOOL_NAME]
     if not calls:
@@ -155,7 +154,7 @@ def check_tool_loop(client, call, message):
         "tool_calls": [{**call, "id": call_id}],
     }
     tool = {"role": "tool", "tool_call_id": call_id, "content": json.dumps(TOOL_RESULT)}
-    body = _chat(_user(PROMPT) + [assistant, tool], tools=[_openai_tool()], tool_choice="auto")
+    body = _chat(client.model, _user(PROMPT) + [assistant, tool], tools=[_openai_tool()], tool_choice="auto")
     final = _message(client.call("POST", "/v1/chat/completions", body, timeout_s=GENERATION_TIMEOUT_S))
     if final.get("tool_calls"):
         raise CheckFailed("the model called a tool again instead of answering")
@@ -166,7 +165,7 @@ def check_tool_loop(client, call, message):
 
 def check_anthropic(client):
     body = {
-        "model": MODEL,
+        "model": client.model,
         "max_tokens": MAX_TOKENS,
         "tools": [{"name": TOOL_NAME, "description": TOOL_DESCRIPTION, "input_schema": TOOL_PARAMETERS}],
         "messages": _user(PROMPT),
@@ -183,7 +182,7 @@ def check_anthropic(client):
 
 
 def check_thinking(client):
-    body = _chat(_user(THINKING_PROMPT), chat_template_kwargs={"enable_thinking": True})
+    body = _chat(client.model, _user(THINKING_PROMPT), chat_template_kwargs={"enable_thinking": True})
     message = _message(client.call("POST", "/v1/chat/completions", body, timeout_s=GENERATION_TIMEOUT_S))
     reasoning, content = message.get("reasoning_content"), message.get("content") or ""
     if not isinstance(reasoning, str) or not reasoning.strip():
@@ -197,7 +196,7 @@ def check_thinking(client):
 
 def check_mtp(client):
     body = _chat(
-        _user(MTP_PROMPT), chat_template_kwargs={"enable_thinking": False}, temperature=0, max_tokens=MTP_MAX_TOKENS
+        client.model, _user(MTP_PROMPT), chat_template_kwargs={"enable_thinking": False}, temperature=0, max_tokens=MTP_MAX_TOKENS
     )
     reply = client.call("POST", "/v1/chat/completions", body, timeout_s=GENERATION_TIMEOUT_S)
     _message(reply)
@@ -236,11 +235,15 @@ def _run(ctx, failed_names):
     if not p.api_key.exists() or not p.api_key.read_text().strip():
         raise service.Stop(f"the API key file {p.api_key} is missing or empty", "Run qlm install")
     key = p.api_key.read_text().strip()
-    mtp_on = "LLAMA_ARG_SPEC_TYPE" in service.active_profile(ctx).settings
+    settings = service.active_profile(ctx).settings
+    if "LLAMA_ARG_ALIAS" not in settings:
+        raise service.Stop(f"{p.active_env} sets no LLAMA_ARG_ALIAS, so the model id to ask for is unknown",
+                           "Run qlm profile use agent")
+    mtp_on = "LLAMA_ARG_SPEC_TYPE" in settings
     log = _Log(ctx)
-    client = _Client(ctx, key, log)
-    ctx.say("Note: these requests replace Con's cached prompt in the server's single slot, "
-            "so Con's next turn re-reads its context.")
+    client = _Client(ctx, key, log, settings["LLAMA_ARG_ALIAS"])
+    ctx.say("Note: these requests replace any cached prompt in the server's single slot, "
+            "so the next request from another client re-reads its context.")
 
     results = {}
 
