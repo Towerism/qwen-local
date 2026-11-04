@@ -6,7 +6,7 @@ check and qlm start's checks pass (ADR 0001: a bad build never replaces a workin
 
 from qlm import install, interrupts, pins, service, smoke
 
-WARNING = "Note: qlm update restarts the server, which interrupts a Con turn in progress."
+WARNING = "Note: qlm update restarts the server, which interrupts a request in progress."
 INTERRUPTED = "interrupted; nothing was changed"
 
 

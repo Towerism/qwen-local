@@ -1,6 +1,6 @@
-"""`qlm bench [--quick]`: measure the running server as Con uses it (docs/architecture.md, "What qlm bench measures").
+"""`qlm bench [--quick]`: measure the running server as a coding agent uses it (docs/architecture.md, "What qlm bench measures").
 
-Prompt processing, generation, MTP draft acceptance, prompt-cache reuse in a Con-shaped session, and
+Prompt processing, generation, MTP draft acceptance, prompt-cache reuse in an agent-shaped session, and
 peak VRAM, with MTP on and off. To measure with MTP off, the profile is swapped for a copy without the
 LLAMA_ARG_SPEC_* lines and always put back, whatever ends the run. Results go to a JSON file and are
 compared with the last comparable run. The numbers never fail the command; only a measurement that
@@ -18,8 +18,8 @@ import threading
 from qlm import files, interrupts, service, smoke
 from qlm.system import SERVER, ServerUnreachable
 
-WARNING = ("Note: qlm bench replaces Con's cached prompt and, in a full run with MTP on, restarts the server "
-           "twice. Don't use Con until it finishes.")
+WARNING = ("Note: qlm bench replaces the server's cached prompt and, in a full run with MTP on, restarts the server "
+           "twice. Don't send it other requests until it finishes.")
 INTERRUPTED = "interrupted; nothing was changed"
 CHAT_TIMEOUT_S = 300
 TOKENIZE_TIMEOUT_S = 30

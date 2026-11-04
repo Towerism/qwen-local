@@ -249,7 +249,7 @@ def preflight(ctx, check_port=True):
     if b"\r" in p.api_key.read_bytes():  # read_text would turn \r\n into \n and hide it
         ctx.warn(
             f"warning: {p.api_key} contains a carriage return; llama-server keeps it as part of the key, "
-            "so requests from qlm and Con will be refused"
+            "so requests from qlm and other clients will be refused"
         )
     missing = missing_files(profile.settings)
     if missing:

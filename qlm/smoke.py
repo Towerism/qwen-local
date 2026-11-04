@@ -239,8 +239,8 @@ def _run(ctx, failed_names):
     mtp_on = "LLAMA_ARG_SPEC_TYPE" in service.active_profile(ctx).settings
     log = _Log(ctx)
     client = _Client(ctx, key, log)
-    ctx.say("Note: these requests replace Con's cached prompt in the server's single slot, "
-            "so Con's next turn re-reads its context.")
+    ctx.say("Note: these requests replace any cached prompt in the server's single slot, "
+            "so the next request from another client re-reads its context.")
 
     results = {}
 

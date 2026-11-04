@@ -192,11 +192,11 @@ def test_a_loading_server_is_not_ready(home, repo):
     assert code == 1 and "qlm start" in ctx.err.getvalue()
 
 
-def test_the_first_line_warns_about_con_and_the_restarts(home, repo):
+def test_the_first_line_warns_about_the_cached_prompt_and_the_restarts(home, repo):
     code, ctx, _ = run_bench(home, repo)
     assert code == 0, out(ctx)
     first = ctx.out.getvalue().splitlines()[0]
-    assert "Con" in first and "restarts the server twice" in first
+    assert "cached prompt" in first and "restarts the server twice" in first
 
 
 # Measurements

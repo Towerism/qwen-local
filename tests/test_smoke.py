@@ -94,7 +94,7 @@ def test_a_healthy_server_passes_all_eight_checks(home, repo):
     code, ctx = run_smoke(home, repo, make_server())
     assert code == 0
     assert [l.split()[:2] for l in lines(ctx)] == [["PASS", str(n)] for n in range(1, 9)]
-    assert "Con's cached prompt" in ctx.out.getvalue().splitlines()[0]
+    assert "replace any cached prompt in the server's single slot" in ctx.out.getvalue().splitlines()[0]
 
 
 def test_requests_carry_the_key_the_way_each_api_expects(home, repo):

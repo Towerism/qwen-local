@@ -257,19 +257,19 @@ def test_start_warns_about_a_carriage_return_in_the_key_file(home, repo):
 
 def test_a_gpu_model_in_ollama_blocks_the_start_but_a_cpu_model_does_not(home, repo):
     install(home, repo)
-    listing = OLLAMA_HEADER + "qwen3.8:27b  a1  17 GB  100% GPU  4096  4 minutes\ncon-suggest:latest  b2  1 GB  100% CPU  4096  4 minutes\n"
+    listing = OLLAMA_HEADER + "qwen3.8:27b  a1  17 GB  100% GPU  4096  4 minutes\ntiny-helper:latest  b2  1 GB  100% CPU  4096  4 minutes\n"
     run = runner({OLLAMA_PS: ok(listing)})
     ctx = ctx_for(home, repo, run=run)
     assert cli.main(["start"], ctx) == 1
     assert "ollama stop qwen3.8:27b" in out(ctx)
-    assert "con-suggest" not in out(ctx)
+    assert "tiny-helper" not in out(ctx)
     assert run.ran(*START) == []
 
 
 @pytest.mark.parametrize(
     "ollama",
     [
-        {OLLAMA_PS: ok(OLLAMA_HEADER + "con-suggest:latest  b2  1 GB  100% CPU  4096  4 minutes\n")},
+        {OLLAMA_PS: ok(OLLAMA_HEADER + "tiny-helper:latest  b2  1 GB  100% CPU  4096  4 minutes\n")},
         {OLLAMA_PS: fail(stderr="could not connect to ollama app")},
         {"which": {"ollama": None}},
     ],
