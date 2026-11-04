@@ -29,6 +29,8 @@ EXPECTED_FILES = [
     "qlm/interrupts.py",
     "qlm/uninstall.py",
     "qlm/bench.py",
+    "profiles/qwen3.6-35b-a3b/agent.env",
+    "profiles/qwen3.6-35b-a3b/long.env",
     "profiles/qwen3.8-27b/agent.env",
     "profiles/qwen3.8-27b/long.env",
     "profiles/qwen3.8-27b/vision.env",

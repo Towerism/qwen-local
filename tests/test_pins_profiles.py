@@ -1,8 +1,10 @@
+import pathlib
 import re
 
 import pytest
 
 from qlm import pins, profiles
+from tests.conftest import REPO
 
 
 ADRS = {
@@ -92,6 +94,32 @@ def test_long_profile_has_no_mtp_and_96k_context(repo):
     keys = profiles.load(repo / "profiles/qwen3.8-27b/long.env").settings
     assert keys["LLAMA_ARG_CTX_SIZE"] == "98304"
     assert not any(k.startswith("LLAMA_ARG_SPEC_") for k in keys)
+
+
+REPO_PROFILES = sorted((path.parent.name, path.stem) for path in (REPO / "profiles").glob("*/*.env"))
+ROLE_KEYS = {"main": "LLAMA_ARG_MODEL", "mtp": "LLAMA_ARG_SPEC_DRAFT_MODEL", "mmproj": "LLAMA_ARG_MMPROJ"}
+
+
+@pytest.mark.parametrize("model_id, name", REPO_PROFILES)
+def test_every_profile_loads_its_own_model_files(repo, model_id, name):
+    model = pins.model(model_id)
+    profile = profiles.load(repo / "profiles" / model_id / f"{name}.env")
+    keys = profile.settings
+    assert keys["LLAMA_ARG_ALIAS"] == model_id
+    for role, key in ROLE_KEYS.items():
+        if key in keys:
+            assert pathlib.PurePath(keys[key]).name in {f.local_name for f in model.files if f.role == role}, key
+    assert "LLAMA_ARG_MODEL" in keys
+    assert (keys.get("LLAMA_ARG_SPEC_TYPE") == "draft-mtp") == ("LLAMA_ARG_SPEC_DRAFT_MODEL" in keys)
+    assert profile.vram_gib <= 23.0
+
+
+def test_each_model_has_its_profile_set(repo):
+    catalog = profiles.load_catalog(repo / "profiles")
+    assert set(catalog) == set(pins.model_ids())
+    assert set(catalog["qwen3.6-35b-a3b"]) == {"agent", "long"}
+    assert set(catalog["qwen3.8-27b"]) == {"agent", "long", "vision"}
+    assert all("agent" in names for names in catalog.values())
 
 
 def test_all_names_used_by_any_profile(repo):
