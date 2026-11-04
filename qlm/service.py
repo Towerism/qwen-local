@@ -268,7 +268,40 @@ def preflight(ctx, check_port=True):
     return profile
 
 
-def start(ctx):
+def start(ctx, name=None):
+    """Start the server with the selected model's `name` profile, or with active.env when it follows the selection."""
+    p = ctx.paths
+    if name is None:
+        name = _profile_for_selection(ctx)
+    if name is not None:
+        before = p.active_env.read_bytes() if p.active_env.exists() else None
+        profile_use(ctx, name)
+        if p.active_env.read_bytes() != before and unit_state(ctx).running:
+            return 0  # profile_use restarted the running server with the new profile and waited until it was ready
+    return _start(ctx)
+
+
+def _profile_for_selection(ctx):
+    """The profile plain qlm start renders first, or None when active.env already follows the selection.
+
+    A missing active.env, or a stock profile of another model, becomes the selected model's profile
+    of the same name (or agent). A custom profile of another model is never overwritten.
+    """
+    p = ctx.paths
+    model_id = selection.current(ctx)
+    alias = selection.active_alias(ctx)
+    if alias == model_id or (p.active_env.exists() and alias not in pins.model_ids()):
+        return None  # active.env is this model's, or one qlm can't place; start it as it is
+    previous = active_profile_name(ctx)
+    if p.active_env.exists() and previous == "custom":
+        raise Stop(
+            f"active.env is a custom profile for {alias}, but {model_id} is selected",
+            f"Run qlm start agent to replace it, or qlm use {alias}",
+        )
+    return previous if previous in model_profiles(ctx, model_id) else "agent"
+
+
+def _start(ctx):
     t0 = ctx.clock.now()
     state = unit_state(ctx)
     name = active_profile_name(ctx)

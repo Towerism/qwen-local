@@ -324,7 +324,6 @@ def test_start_while_loading_waits_without_starting_again(home, repo):
     "breakage, fix",
     [
         ("unit", "qlm install"),
-        ("active_env", "qlm profile use agent"),
         ("key", "qlm install"),
         ("model", "qlm fetch"),
         ("port", "PID 4242"),
@@ -335,8 +334,6 @@ def test_start_refuses_before_starting_anything(home, repo, breakage, fix):
     env = FakeEnv(path=[str(p.local_bin)])
     if breakage == "unit":
         p.unit_file.unlink()
-    elif breakage == "active_env":
-        p.active_env.unlink()
     elif breakage == "key":
         p.api_key.write_text("")
     elif breakage == "model":
@@ -365,6 +362,126 @@ def test_start_warns_about_a_carriage_return_in_the_key_file(home, repo):
     ctx = ctx_for(home, repo, run=run)
     assert cli.main(["start"], ctx) == 0
     assert "carriage return" in ctx.err.getvalue()
+
+
+# start [profile] and the selected model
+
+
+def ready_after(stopped_reads):
+    """systemctl show answers: stopped this many times, then running once the start is under way.
+
+    A switch while stopped reads the unit three times before starting: in profile_use, in start
+    to see whether profile_use restarted it, and in the start itself.
+    """
+    return [unit()] * stopped_reads + [unit("active", "running", 4321, f"@{NOW_UNIX}")]
+
+
+@pytest.mark.parametrize("command", [["start", "vision"], ["profile", "use", "vision"]])
+def test_a_profile_the_selected_model_lacks_is_refused(home, repo, command):
+    p = install(home, repo, model="qwen3.6-35b-a3b")
+    before = p.active_env.read_bytes()
+    run = runner()
+    ctx = ctx_for(home, repo, run=run)
+    assert cli.main(command, ctx) == 2
+    assert "qlm: the vision profile is not available for qwen3.6-35b-a3b. Choose one of: agent, long." in out(ctx)
+    assert p.active_env.read_bytes() == before
+    assert run.calls == []
+
+
+def test_start_without_active_env_renders_the_selected_models_agent_profile(home, repo):
+    p = install(home, repo)
+    p.active_env.unlink()
+    run = runner({SHOW: ready_after(3)})
+    ctx = ctx_for(home, repo, run=run)
+    assert cli.main(["start"], ctx) == 0
+    assert p.active_env.read_text() == rendered(home, repo, "agent")
+    assert len(run.ran(*START)) == 1
+
+
+def test_start_renders_the_selected_model_over_a_stock_profile_of_another(home, repo):
+    p = install(home, repo, profile="long")
+    add_model_files(p, "qwen3.6-35b-a3b")
+    select_model(home, "qwen3.6-35b-a3b")
+    run = runner({SHOW: ready_after(3), SMI_GPU: gpu(24564, 1000)})  # room for the 35B profile
+    ctx = ctx_for(home, repo, run=run)
+    assert cli.main(["start"], ctx) == 0
+    assert p.active_env.read_text() == rendered(home, repo, "long", "qwen3.6-35b-a3b")
+    assert len(run.ran(*START)) == 1
+    assert "with the long profile" in out(ctx)
+
+
+def test_start_while_running_another_models_stock_profile_restarts_into_the_selected_one(home, repo):
+    p = install(home, repo)
+    add_model_files(p, "qwen3.6-35b-a3b")
+    select_model(home, "qwen3.6-35b-a3b")
+    run = runner({SHOW: RUNNING, SMI_APPS: apps(("4321", "llama-server", "20800"))})
+    ctx = ctx_for(home, repo, run=run)
+    assert cli.main(["start"], ctx) == 0
+    assert p.active_env.read_text() == rendered(home, repo, "agent", "qwen3.6-35b-a3b")
+    assert len(run.ran(*RESTART)) == 1 and run.ran(*START) == []
+    assert "ready" in out(ctx) and "with the agent profile" in out(ctx)
+    assert "already running" not in out(ctx)
+
+
+def test_start_keeps_a_custom_profile_of_the_selected_model(home, repo):
+    p = install(home, repo)
+    p.active_env.write_text(p.active_env.read_text().replace("65536", "60000"))
+    custom = p.active_env.read_bytes()
+    run = runner({SHOW: ready_after(1)})
+    ctx = ctx_for(home, repo, run=run)
+    assert cli.main(["start"], ctx) == 0
+    assert p.active_env.read_bytes() == custom
+    assert len(run.ran(*START)) == 1
+
+
+def test_start_refuses_a_custom_profile_of_another_model(home, repo):
+    p = install(home, repo)
+    add_model_files(p, "qwen3.6-35b-a3b")
+    p.active_env.write_text(p.active_env.read_text().replace("65536", "60000"))
+    custom = p.active_env.read_bytes()
+    select_model(home, "qwen3.6-35b-a3b")
+    run = runner()
+    ctx = ctx_for(home, repo, run=run)
+    assert cli.main(["start"], ctx) == 1
+    assert "active.env is a custom profile for qwen3.8-27b, but qwen3.6-35b-a3b is selected" in out(ctx)
+    assert "qlm start agent" in out(ctx) and "qlm use qwen3.8-27b" in out(ctx)
+    assert p.active_env.read_bytes() == custom
+    assert run.ran(*START) == [] and run.ran(*RESTART) == []
+
+
+def test_start_with_a_profile_name_while_running_restarts_into_it(home, repo):
+    p = install(home, repo, profile="long")
+    run = runner({SHOW: RUNNING, SMI_APPS: apps(("4321", "llama-server", "20800"))})
+    ctx = ctx_for(home, repo, run=run)
+    assert cli.main(["start", "agent"], ctx) == 0
+    assert p.active_env.read_text() == rendered(home, repo, "agent")
+    assert len(run.ran(*RESTART)) == 1 and run.ran(*START) == []
+    assert "with the agent profile" in out(ctx)
+
+
+def test_start_with_a_profile_name_while_stopped_switches_then_starts(home, repo):
+    p = install(home, repo)
+    run = runner({SHOW: ready_after(3)})
+    ctx = ctx_for(home, repo, run=run)
+    assert cli.main(["start", "long"], ctx) == 0
+    assert p.active_env.read_text() == rendered(home, repo, "long")
+    assert len(run.ran(*START)) == 1
+    assert "with the long profile" in out(ctx)
+
+
+def test_start_after_a_failed_restart_in_use_goes_back_to_the_selected_model(home, repo):
+    p = install(home, repo)
+    add_model_files(p, "qwen3.6-35b-a3b")
+    run = runner({SHOW: [RUNNING, RUNNING, unit("failed", "failed", 0)], SMI_APPS: apps(("4321", "llama-server", "20800"))})
+    ctx = ctx_for(home, repo, run=run, server=FakeServer({("GET", "/health"): REFUSED}))
+    assert cli.main(["use", "qwen3.6-35b-a3b"], ctx) == 1
+
+    run = runner({SHOW: ready_after(3)})
+    ctx = ctx_for(home, repo, run=run)
+    assert cli.main(["start"], ctx) == 0
+    assert p.selection.read_text() == "qwen3.8-27b\n"
+    assert p.active_env.read_text() == rendered(home, repo, "agent")
+    assert len(run.ran(*START)) == 1
 
 
 # start: Ollama and VRAM

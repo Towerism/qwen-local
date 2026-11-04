@@ -33,7 +33,7 @@ def build_parser():
             "the same profile as now (or agent) is written to active.env, and a running server restarts with it. "
             "When they are missing, only the choice is saved: run qlm fetch, then qlm start. "
             "If the restart fails, active.env keeps the new model's profile while the previous model stays "
-            "selected; fix the cause and run qlm use again."
+            "selected: qlm start goes back to the selected model, and qlm use tries again."
         ),
     )
     use_model.add_argument("model", metavar="<model>", help="one of: " + ", ".join(pins.model_ids()))
@@ -41,8 +41,9 @@ def build_parser():
     profile_sub = profile.add_subparsers(dest="action", metavar="<action>", parser_class=_Parser)
     profile_sub.required = True
     use = profile_sub.add_parser("use", help="make a profile active; restarts the server if it is running")
-    use.add_argument("name", help="a profile in profiles/, such as agent, long or vision")
-    sub.add_parser("start", help="start the server after checking VRAM, and wait until it is ready")
+    use.add_argument("name", help="a profile of the selected model, such as agent or long")
+    start = sub.add_parser("start", help="start the server after checking VRAM, and wait until it is ready")
+    start.add_argument("name", nargs="?", help="switch to this profile of the selected model first")
     sub.add_parser("stop", help="stop the server")
     sub.add_parser("status", help="show the server's state, profile, VRAM and context use")
     sub.add_parser("smoke", help="run eight API checks against the running server")
@@ -129,17 +130,14 @@ def _dispatch(args, ctx):
             print(f"qlm: no model named {args.model!r}. Choose one of: {', '.join(pins.model_ids())}.", file=ctx.err)
             return 2
         return service.run(ctx, service.use, model_id=args.model)
-    if args.command == "profile":
-        from qlm import selection, service
+    if args.command in ("profile", "start") and args.name is not None:
+        from qlm import service
 
-        try:
-            names = sorted(service.model_profiles(ctx, selection.current(ctx)))
-        except service.Stop as stop:
-            return ctx.fail(stop.what, stop.todo)
-        if args.name not in names:
-            print(f"qlm: no profile named {args.name!r}. Choose one of: {', '.join(names)}.", file=ctx.err)
-            return 2
-        return service.run(ctx, service.profile_use, name=args.name)
+        code = _check_profile_name(ctx, args.name)
+        if code is not None:
+            return code
+        if args.command == "profile":
+            return service.run(ctx, service.profile_use, name=args.name)
     if args.command == "bench":
         from qlm import bench
 
@@ -161,5 +159,26 @@ def _dispatch(args, ctx):
 
         if args.command == "logs":
             return service.logs(ctx, lines=args.lines, follow=args.follow)
+        if args.command == "start":
+            return service.run(ctx, service.start, name=args.name)
         return service.run(ctx, getattr(service, args.command))
+    return 2
+
+
+def _check_profile_name(ctx, name):
+    """None when the selected model has this profile, else the exit code after saying why."""
+    from qlm import profiles, selection, service
+
+    try:
+        model_id = selection.current(ctx)
+    except service.Stop as stop:
+        return ctx.fail(stop.what, stop.todo)
+    catalog = profiles.load_catalog(ctx.paths.profiles_dir)
+    names = sorted(catalog[model_id])
+    if name in names:
+        return None
+    if any(name in other for other in catalog.values()):
+        print(f"qlm: the {name} profile is not available for {model_id}. Choose one of: {', '.join(names)}.", file=ctx.err)
+    else:
+        print(f"qlm: no profile named {name!r}. Choose one of: {', '.join(names)}.", file=ctx.err)
     return 2
