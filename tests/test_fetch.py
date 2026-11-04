@@ -198,7 +198,7 @@ def test_progress_only_on_a_terminal_and_one_failure_does_not_block_the_other(ho
 
     (models(home) / files[0].local_name).unlink()
     code, ctx = run_fetch(home, repo, FakeHttp(urls, chunk=10), env=FakeEnv(tty=True))
-    lines = [l for l in ctx.err.getvalue().splitlines() if l.startswith(files[0].local_name) and l.endswith("%")]
+    lines = [line for line in ctx.err.getvalue().splitlines() if line.startswith(files[0].local_name) and line.endswith("%")]
     assert 1 <= len(lines) <= 101
 
 
@@ -378,6 +378,6 @@ def test_progress_restarts_counting_after_a_full_restart(home, repo, pinned):
     (models(home) / (files[0].local_name + ".part")).write_bytes(b"s" * 1000)
     http = FakeHttp(urls, ranges=False, chunk=10)
     code, ctx = run_fetch(home, repo, http, env=FakeEnv(tty=True))
-    lines = [l for l in ctx.err.getvalue().splitlines() if l.startswith(files[0].local_name) and l.endswith("%")]
+    lines = [line for line in ctx.err.getvalue().splitlines() if line.startswith(files[0].local_name) and line.endswith("%")]
     assert code == 0
     assert lines[0].endswith(" 0%") and len(lines) <= 101

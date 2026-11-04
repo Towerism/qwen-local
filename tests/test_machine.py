@@ -8,7 +8,6 @@ does the same and leaves a result in ~/.local/state/qlm/bench/.
 """
 
 import io
-import shutil
 from pathlib import Path
 
 import pytest
@@ -29,7 +28,7 @@ def test_doctor_reports_all_eleven_checks_on_this_machine(repo):
     doctor.run(ctx)
     lines = ctx.out.getvalue().splitlines()
     assert len(lines) == 11
-    assert all(l.split()[0] in ("PASS", "WARN", "FAIL") for l in lines)
+    assert all(line.split()[0] in ("PASS", "WARN", "FAIL") for line in lines)
     assert lines[0].startswith("PASS gpu:")
 
 

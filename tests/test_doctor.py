@@ -1,6 +1,4 @@
-import os
-
-from qlm import cli, doctor
+from qlm import cli
 from tests.fakes import FakeEnv, FakeRunner, fail, make_ctx, ok
 
 GPU = ("nvidia-smi", "--query-gpu=name,compute_cap,memory.total,memory.used,driver_version",
@@ -33,7 +31,7 @@ def run_doctor(home, repo, runner=None, env=None):
 
 
 def line_for(lines, name):
-    matches = [l for l in lines if f" {name}:" in l]
+    matches = [line for line in lines if f" {name}:" in line]
     assert len(matches) == 1, (name, lines)
     return matches[0]
 
@@ -42,7 +40,7 @@ def test_healthy_machine_passes_every_check(home, repo):
     code, lines, _ = run_doctor(home, repo)
     assert code == 0
     assert len(lines) == 11
-    assert all(l.startswith("PASS ") for l in lines), lines
+    assert all(line.startswith("PASS ") for line in lines), lines
 
 
 def test_low_vram_warns_and_names_each_gpu_process(home, repo):

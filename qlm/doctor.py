@@ -105,7 +105,7 @@ def _nvcc(ctx):
     if not path:
         return Check("FAIL", "nvcc", "not found on PATH or in /opt/cuda/bin; install the cuda package")
     r = _run(ctx, [path, "--version"])
-    release = next((l.split("release", 1)[1].strip() for l in r.stdout.splitlines() if "release" in l), "unknown version")
+    release = next((line.split("release", 1)[1].strip() for line in r.stdout.splitlines() if "release" in line), "unknown version")
     return Check("PASS", "nvcc", f"{path}, release {release}")
 
 
@@ -164,7 +164,7 @@ def _ollama(ctx):
     r = _run(ctx, ["ollama", "ps"])
     if r.code != 0:
         return Check("PASS", "ollama", "daemon not running")
-    on_gpu = [l.split()[0] for l in r.stdout.splitlines()[1:] if l.strip() and "GPU" in l]
+    on_gpu = [line.split()[0] for line in r.stdout.splitlines()[1:] if line.strip() and "GPU" in line]
     if on_gpu:
         names = ", ".join(on_gpu)
         return Check("WARN", "ollama", f"model on the GPU: {names}; free it with: ollama stop {on_gpu[0]}")

@@ -95,7 +95,7 @@ def metrics_text(accepted, steps):
 
 
 def bench_runner(stream_lines=("4321, 19800", "4321, 20100", "9999, 23000", "4321, 19950"), overrides=None):
-    script = {SHOW: RUNNING, STREAM: ok("".join(f"{l}\n" for l in stream_lines))}
+    script = {SHOW: RUNNING, STREAM: ok("".join(f"{line}\n" for line in stream_lines))}
     script.update(overrides or {})
     return runner(script)
 
@@ -343,7 +343,7 @@ def test_a_full_run_switches_mtp_off_and_back(home, repo):
     code = cli.main(["bench"], ctx)
     assert code == 0, out(ctx)
     assert seen["backup"] == original and seen["backup_mode"] == 0o600
-    assert seen["variant"] == "".join(l + "\n" for l in original.splitlines() if not l.startswith("LLAMA_ARG_SPEC_"))
+    assert seen["variant"] == "".join(line + "\n" for line in original.splitlines() if not line.startswith("LLAMA_ARG_SPEC_"))
     assert p.active_env.read_text() == original
     assert not p.bench_backup.exists()
     assert len(run.ran(*RESTART)) == 2
@@ -525,9 +525,9 @@ def test_the_comparison_uses_the_newest_matching_run(home, repo):
     assert cli.main(["bench", "--quick"], ctx) == 0, out(ctx)
     text = ctx.out.getvalue()
     assert "bench-20261016T110000Z-1.json" in text
-    line = next(l for l in text.splitlines() if "mtp_on.pp_2048.tok_s" in l and "+" in l)
+    line = next(text_line for text_line in text.splitlines() if "mtp_on.pp_2048.tok_s" in text_line and "+" in text_line)
     assert "+25.0%" in line
-    assert any("mtp_on.only_then" in l and " - " in l for l in text.splitlines())
+    assert any("mtp_on.only_then" in text_line and " - " in text_line for text_line in text.splitlines())
     assert "bench-20261016T140000Z.json" in ctx.err.getvalue()
 
 

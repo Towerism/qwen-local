@@ -83,17 +83,17 @@ def run_smoke(home, repo, server, profile="agent"):
 
 
 def lines(ctx):
-    return [l for l in ctx.out.getvalue().splitlines() if l.split(" ", 1)[0] in ("PASS", "FAIL", "SKIP")]
+    return [line for line in ctx.out.getvalue().splitlines() if line.split(" ", 1)[0] in ("PASS", "FAIL", "SKIP")]
 
 
 def status_of(ctx, number):
-    return next(l for l in lines(ctx) if l.split()[1] == str(number)).split()[0]
+    return next(line for line in lines(ctx) if line.split()[1] == str(number)).split()[0]
 
 
 def test_a_healthy_server_passes_all_eight_checks(home, repo):
     code, ctx = run_smoke(home, repo, make_server())
     assert code == 0
-    assert [l.split()[:2] for l in lines(ctx)] == [["PASS", str(n)] for n in range(1, 9)]
+    assert [line.split()[:2] for line in lines(ctx)] == [["PASS", str(n)] for n in range(1, 9)]
     assert "replace any cached prompt in the server's single slot" in ctx.out.getvalue().splitlines()[0]
 
 
@@ -166,7 +166,7 @@ def bad_tool_call(arguments=None, calls=True):
 def test_a_wrong_tool_call_fails_and_skips_the_loop(home, repo, body, reason):
     code, ctx = run_smoke(home, repo, make_server(tool_call=body))
     assert code == 1
-    assert status_of(ctx, 3) == "FAIL" and reason in next(l for l in lines(ctx) if l.split()[1] == "3")
+    assert status_of(ctx, 3) == "FAIL" and reason in next(line for line in lines(ctx) if line.split()[1] == "3")
     assert status_of(ctx, 4) == "SKIP"
 
 
@@ -225,7 +225,7 @@ def test_mtp_needs_accepted_draft_tokens(home, repo, timings):
 
 def test_mtp_detail_shows_accepted_out_of_drafted(home, repo):
     code, ctx = run_smoke(home, repo, make_server())
-    assert "232 of 234" in next(l for l in lines(ctx) if l.split()[1] == "7")
+    assert "232 of 234" in next(line for line in lines(ctx) if line.split()[1] == "7")
 
 
 def test_a_server_that_accepts_requests_without_the_key_fails(home, repo):
@@ -238,8 +238,8 @@ def test_errors_and_timeouts_fail_only_their_own_check(home, repo):
     server = make_server(models=reply(500, "boom"), tool_call=ServerUnreachable("timed out after 180 s"))
     code, ctx = run_smoke(home, repo, server)
     assert code == 1
-    assert "HTTP 500" in next(l for l in lines(ctx) if l.split()[1] == "2")
-    assert "timed out after 180 s" in next(l for l in lines(ctx) if l.split()[1] == "3")
+    assert "HTTP 500" in next(line for line in lines(ctx) if line.split()[1] == "2")
+    assert "timed out after 180 s" in next(line for line in lines(ctx) if line.split()[1] == "3")
     assert status_of(ctx, 4) == "SKIP"
     assert [status_of(ctx, n) for n in (5, 6, 7, 8)] == ["PASS"] * 4
     assert "2 models" in ctx.err.getvalue() and "3 tool call" in ctx.err.getvalue()
@@ -249,7 +249,7 @@ def test_a_reply_cut_off_by_the_token_limit_says_so(home, repo):
     body = copy.deepcopy(fixture("thinking"))
     body["choices"][0]["finish_reason"] = "length"
     code, ctx = run_smoke(home, repo, make_server(thinking=body))
-    assert "token limit" in next(l for l in lines(ctx) if l.split()[1] == "6")
+    assert "token limit" in next(line for line in lines(ctx) if line.split()[1] == "6")
 
 
 def test_a_wrong_key_is_explained(home, repo):
