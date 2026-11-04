@@ -54,9 +54,9 @@ def _spec_type_mentions_draft_mtp(text):
 def run(ctx, rebuild=False):
     tag = pins.LLAMA_TAG
     p = ctx.paths
-    required = profiles.all_setting_names(p.profiles_dir)
     bin_dir = p.tag_dir(tag) / "bin"
     try:
+        required = profiles.all_setting_names(p.profiles_dir)
         built = False
         if rebuild or not _installed_and_valid(ctx, bin_dir / "llama-server", required):
             with _Log(ctx, "install") as log:
@@ -70,6 +70,8 @@ def run(ctx, rebuild=False):
         _write_private_files(ctx)
     except (_Stop, service.Stop) as stop:
         return ctx.fail(stop.what, stop.todo)
+    except profiles.ProfileError as e:
+        return ctx.fail(f"a profile in {p.profiles_dir} doesn't parse: {e}", "Fix it and run qlm install again")
     except OSError as e:
         return ctx.fail(f"file error: {e}", "Nothing after this step was changed; fix the cause and run qlm install again")
     if (built or switched) and _server_pid(ctx):

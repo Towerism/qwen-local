@@ -361,6 +361,18 @@ def test_copy_failure_ends_with_a_summary_line(home, repo, monkeypatch):
     assert last.startswith("qlm: ") and "No space left" in last
 
 
+def test_a_profile_that_does_not_parse_ends_with_a_summary_line(home, repo, tmp_path):
+    import shutil
+
+    copy = tmp_path / "repo"
+    shutil.copytree(repo / "profiles", copy / "profiles")
+    (copy / "profiles/qwen3.8-27b/long.env").write_text("# qlm: vram_gib=20\nnonsense\n")
+    ctx = make_ctx(home, copy, runner=FakeRunner({}))
+    assert cli.main(["install"], ctx) == 1
+    last = ctx.err.getvalue().rstrip().splitlines()[-1]
+    assert last.startswith("qlm: ") and "long line 2: expected LLAMA_ARG_<NAME>=<value>" in last
+    assert ctx.runner.calls == []
+
 def test_current_that_is_a_real_directory_fails_cleanly(home, repo):
     m = Machine(home, repo)
     (m.paths.llama_current / "stuff").mkdir(parents=True)
