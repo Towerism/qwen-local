@@ -1,4 +1,4 @@
-"""`qlm fetch`: download the pinned model files with resume, and verify them against ADR 0002.
+"""`qlm fetch`: download the selected model's pinned files with resume, and verify them against its ADR.
 
 It never deletes or overwrites a final model file; a corrupt one is reported for the user to remove.
 """
@@ -50,7 +50,11 @@ def run(ctx, vision=False):
 
 
 def _run(ctx, vision):
-    wanted = pins.files(pins.model(selection.current(ctx)), vision)
+    model = pins.model(selection.current(ctx))
+    if vision and not any(f.role == "mmproj" for f in model.files):
+        print(f"qlm: no vision files for {model.id}. Run qlm fetch without --vision.", file=ctx.err)
+        return 2
+    wanted = pins.files(model, vision)
     models = ctx.paths.models
     models.mkdir(parents=True, exist_ok=True)
     failed, pending = [], []
@@ -86,7 +90,7 @@ def _run(ctx, vision):
     if failed:
         names = ", ".join(f.local_name for f in failed)
         return ctx.fail(f"{len(failed)} file(s) failed: {names}", "See the messages above, then run qlm fetch again")
-    _write_sums(models, wanted)
+    _write_sums(models)
     return 0
 
 
@@ -197,7 +201,9 @@ def _verify_and_place(ctx, f, part):
     os.replace(part, ctx.paths.models / f.local_name)
 
 
-def _write_sums(models, files):
+def _write_sums(models):
+    """List every catalog file present in models/, so a fetch of one model keeps the other model's lines."""
+    present = [f for m in pins.MODELS for f in m.files if (models / f.local_name).exists()]
     tmp = models / ".SHA256SUMS.tmp"
-    tmp.write_text("".join(f"{f.sha256}  {f.local_name}\n" for f in files))
+    tmp.write_text("".join(f"{f.sha256}  {f.local_name}\n" for f in present))
     os.replace(tmp, models / "SHA256SUMS")

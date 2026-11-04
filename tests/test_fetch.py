@@ -40,6 +40,59 @@ def test_a_fresh_home_fetches_the_35b_files(home, repo, monkeypatch):
         assert (models(home) / f.local_name).read_bytes() == contents[f.local_name]
 
 
+def test_the_35b_files_come_from_their_own_pinned_repos_and_revisions(home, repo, monkeypatch):
+    files, contents, urls = small_pins(monkeypatch, "qwen3.6-35b-a3b")
+    http = FakeHttp(urls)
+
+    code, ctx = run_fetch(home, repo, http)
+
+    assert code == 0, ctx.err.getvalue()
+    assert [r["url"] for r in http.requests] == [
+        "https://huggingface.co/mradermacher/Qwen3.6-35B-A3B-GGUF/resolve/"
+        "ac96549d2e8b902f1a772083a33d13b5ee01fe3c/Qwen3.6-35B-A3B.Q4_K_M.gguf",
+        "https://huggingface.co/ggml-org/Qwen3.6-35B-A3B-GGUF/resolve/"
+        "7878dc9a905c7c9379e5e8d6a1aa9affdd6839c5/mtp-Qwen3.6-35B-A3B-Q4_0.gguf",
+    ]
+    assert ctx.out.getvalue().count("downloaded and verified") == 2
+
+
+def test_a_wrong_35b_download_is_removed_and_reported(home, repo, monkeypatch):
+    files, contents, urls = small_pins(monkeypatch, "qwen3.6-35b-a3b")
+    mtp = files[1]
+    urls[pins.download_url(mtp)] = b"x" * mtp.size
+
+    code, ctx = run_fetch(home, repo, FakeHttp(urls))
+
+    assert code == 1
+    assert f"{mtp.local_name}: the download doesn't match the pinned size and SHA-256" in ctx.err.getvalue()
+    assert not (models(home) / mtp.local_name).exists()
+    assert not (models(home) / (mtp.local_name + ".part")).exists()
+    assert (models(home) / files[0].local_name).read_bytes() == contents[files[0].local_name]
+
+
+def test_sha256sums_keeps_the_27b_lines_after_a_35b_fetch(home, repo, monkeypatch):
+    qwen35, contents, urls = small_pins(monkeypatch, "qwen3.6-35b-a3b")
+    qwen27 = pins.model("qwen3.8-27b").files[:2]
+    for f in qwen27:
+        (models(home) / f.local_name).write_bytes(contents[f.local_name])
+
+    assert run_fetch(home, repo, FakeHttp(urls))[0] == 0
+
+    sums = (models(home) / "SHA256SUMS").read_text().splitlines()
+    assert sorted(sums) == sorted(f"{f.sha256}  {f.local_name}" for f in (*qwen35, *qwen27))
+
+
+def test_vision_for_a_model_without_a_projector_is_a_usage_error(home, repo, monkeypatch):
+    _, _, urls = small_pins(monkeypatch, "qwen3.6-35b-a3b")
+    http = FakeHttp(urls)
+
+    code, ctx = run_fetch(home, repo, http, "--vision")
+
+    assert code == 2
+    assert "no vision files for qwen3.6-35b-a3b" in ctx.err.getvalue()
+    assert http.requests == []
+
+
 def test_present_files_make_no_requests(home, repo, pinned):
     files, contents, urls = pinned
     for f in files[:2]:
