@@ -265,6 +265,17 @@ def test_a_failed_restart_in_use_keeps_the_previous_selection(home, repo):
     assert p.active_env.read_text() == rendered(home, repo, "agent", "qwen3.6-35b-a3b")
 
 
+def test_a_failed_restart_in_use_keeps_the_model_of_an_install_from_before_selection(home, repo):
+    p = install(home, repo)
+    p.selection.unlink()
+    add_model_files(p, "qwen3.6-35b-a3b")
+    run = runner({SHOW: [RUNNING, RUNNING, unit("failed", "failed", 0)], SMI_APPS: apps(("4321", "llama-server", "20800"))})
+    ctx = ctx_for(home, repo, run=run, server=FakeServer({("GET", "/health"): REFUSED}))
+    assert cli.main(["use", "qwen3.6-35b-a3b"], ctx) == 1
+    assert p.selection.read_text() == "qwen3.8-27b\n"
+    assert "Go back with qlm profile use agent" in out(ctx)
+
+
 def test_use_says_when_it_replaces_a_custom_active_env(home, repo):
     p = install(home, repo)
     add_model_files(p, "qwen3.6-35b-a3b")
@@ -480,6 +491,21 @@ def test_start_after_a_failed_restart_in_use_goes_back_to_the_selected_model(hom
     ctx = ctx_for(home, repo, run=run)
     assert cli.main(["start"], ctx) == 0
     assert p.selection.read_text() == "qwen3.8-27b\n"
+    assert p.active_env.read_text() == rendered(home, repo, "agent")
+    assert len(run.ran(*START)) == 1
+
+
+def test_start_after_a_failed_restart_in_use_goes_back_to_the_model_of_an_install_from_before_selection(home, repo):
+    p = install(home, repo)
+    p.selection.unlink()
+    add_model_files(p, "qwen3.6-35b-a3b")
+    run = runner({SHOW: [RUNNING, RUNNING, unit("failed", "failed", 0)], SMI_APPS: apps(("4321", "llama-server", "20800"))})
+    ctx = ctx_for(home, repo, run=run, server=FakeServer({("GET", "/health"): REFUSED}))
+    assert cli.main(["use", "qwen3.6-35b-a3b"], ctx) == 1
+
+    run = runner({SHOW: ready_after(3)})
+    ctx = ctx_for(home, repo, run=run)
+    assert cli.main(["start"], ctx) == 0
     assert p.active_env.read_text() == rendered(home, repo, "agent")
     assert len(run.ran(*START)) == 1
 

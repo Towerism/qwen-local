@@ -404,6 +404,8 @@ def use(ctx, model_id):
             f"{model_id} is selected but its files are missing: " + ", ".join(path for _, path in missing),
             f"{_fetch_hint(missing)}, then qlm start {name}",
         )
+    if not p.selection.exists():
+        selection.save(ctx, selected)  # else a failed restart leaves active.env, and so the selection, on model_id
     profile_use(ctx, name, model_id)
     selection.save(ctx, model_id)
     if replacing_custom:
