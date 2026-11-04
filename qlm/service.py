@@ -349,6 +349,7 @@ def bring_up(ctx, restart):
 
 def profile_use(ctx, name, model_id=None):
     p = ctx.paths
+    leftover_bench_backup(ctx)
     profile = profiles.load(p.model_profiles_dir(model_id or selection.current(ctx)) / f"{name}.env")
     text = profile.render(p.home)
     missing = missing_files(profiles.parse(name, text).settings)
@@ -386,6 +387,7 @@ def use(ctx, model_id):
     missing: then only the selection is saved, so qlm fetch knows what to fetch.
     """
     p = ctx.paths
+    leftover_bench_backup(ctx)
     try:
         selected = selection.current(ctx)
     except Stop:

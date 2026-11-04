@@ -296,6 +296,19 @@ def test_use_again_after_a_failed_restart_selects_the_model_and_names_qlm_start(
     assert p.active_env.read_text() == rendered(home, repo, "agent", "qwen3.6-35b-a3b")
     assert len(run.ran(*START)) == 1
 
+@pytest.mark.parametrize("argv", [["use", "qwen3.6-35b-a3b"], ["profile", "use", "long"]])
+def test_a_leftover_bench_backup_blocks_a_switch(home, repo, argv):
+    p = install(home, repo)
+    add_model_files(p, "qwen3.6-35b-a3b")
+    p.bench_backup.write_text("x")
+    before = p.selection.read_bytes(), p.active_env.read_bytes()
+    run = runner({SHOW: RUNNING})
+    ctx = ctx_for(home, repo, run=run)
+    assert cli.main(argv, ctx) == 1
+    assert f"mv {p.bench_backup} {p.active_env}" in out(ctx)
+    assert (p.selection.read_bytes(), p.active_env.read_bytes()) == before
+    assert run.calls == []
+
 def test_use_says_when_it_replaces_a_custom_active_env(home, repo):
     p = install(home, repo)
     add_model_files(p, "qwen3.6-35b-a3b")
