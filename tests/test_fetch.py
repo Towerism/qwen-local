@@ -29,19 +29,7 @@ def models(home):
     return d
 
 
-def test_a_fresh_home_fetches_the_35b_files(home, repo, monkeypatch):
-    files, contents, urls = small_pins(monkeypatch, "qwen3.6-35b-a3b")
-    http = FakeHttp(urls)
-
-    code, ctx = run_fetch(home, repo, http)
-
-    assert code == 0, ctx.err.getvalue()
-    assert sorted(r["url"] for r in http.requests) == sorted(pins.download_url(f) for f in files)
-    for f in files:
-        assert (models(home) / f.local_name).read_bytes() == contents[f.local_name]
-
-
-def test_the_35b_files_come_from_their_own_pinned_repos_and_revisions(home, repo, monkeypatch):
+def test_a_fresh_home_fetches_the_35b_files_from_their_own_pinned_repos_and_revisions(home, repo, monkeypatch):
     files, contents, urls = small_pins(monkeypatch, "qwen3.6-35b-a3b")
     http = FakeHttp(urls)
 
@@ -55,6 +43,8 @@ def test_the_35b_files_come_from_their_own_pinned_repos_and_revisions(home, repo
         "7878dc9a905c7c9379e5e8d6a1aa9affdd6839c5/mtp-Qwen3.6-35B-A3B-Q4_0.gguf",
     ]
     assert ctx.out.getvalue().count("downloaded and verified") == 2
+    for f in files:
+        assert (models(home) / f.local_name).read_bytes() == contents[f.local_name]
 
 
 def test_a_wrong_35b_download_is_removed_and_reported(home, repo, monkeypatch):
