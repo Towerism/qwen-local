@@ -61,7 +61,7 @@ Context checkpoints and the prompt cache (`--cache-ram`) live in system RAM, not
 
 | Profile | Context | MTP | Projector | Server VRAM | Use |
 |---|---|---|---|---|---|
-| `agent` (default) | 64k | On | Off | ~20.3 GiB | Con, everyday |
+| `agent` (default) | 64k | On | Off | ~20.3 GiB | Coding agents, everyday |
 | `long` | 96k | Off | Off | ~20.0 GiB | Large refactors where context matters more than speed |
 | `vision` | 32k | Off | On (BF16, 0.87 GiB) | ~18.7 GiB | Screenshots or images |
 

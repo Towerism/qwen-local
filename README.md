@@ -1,8 +1,8 @@
 # qwen-local
 
-`qlm` sets up and runs Qwen3.8-27B (Q4_K_M) on one RTX 4090 with llama.cpp's `llama-server`, as the local model behind the [Con](https://github.com/nowledge-co/con-terminal) AI terminal.
+`qlm` installs llama.cpp and runs a pinned local model as a systemd user service.
 
-**Status:** every command in the design works: set up, run and check the server, connect Con, benchmark, update llama.cpp and uninstall.
+**Status:** every command in the design works: set up, run and check the server, benchmark, update llama.cpp and uninstall.
 
 Read these first:
 
@@ -10,7 +10,6 @@ Read these first:
 - [docs/adr/](docs/adr/): the decisions behind it and the reasons for each.
   - [0001](docs/adr/0001-runtime-llama-cpp-server.md): llama-server instead of Ollama, for multi-token prediction (MTP) and prompt-cache reuse.
   - [0002](docs/adr/0002-model-file-and-vram-budget.md): the model file and the video-memory (VRAM) budget.
-  - [0003](docs/adr/0003-con-integration.md): how Con connects.
   - [0004](docs/adr/0004-python-stdlib-cli-and-systemd-user-unit.md): a Python standard-library CLI with a systemd user service.
 
 The design targets one machine: i9-13900KF, 62 GiB RAM, RTX 4090 24 GB, Arch Linux. On other hardware, redo the VRAM arithmetic in ADR 0002 before using the settings.
@@ -27,18 +26,14 @@ qlm fetch           # download and verify the model files (about 17.8 GB)
 
 `qlm doctor` prints the line to add to `~/.zshrc` if `~/.local/bin` isn't on your `PATH`.
 
-Then start the server, check it, and point Con at it. Quit Con before `qlm con --apply`, because Con must not be running while its config changes:
+Then start the server and check it:
 
 ```bash
 qlm start           # check free VRAM, start the server and wait until it is ready
 qlm smoke           # eight API checks: tool calls, thinking, MTP and the API key
-qlm con --print     # show what --apply would change in ~/.config/con/con.conf
-qlm con --apply     # write the settings, after a backup; undo with qlm con --revert
 ```
 
-Start Con again, open a new tab and ask its agent something. That last check is by hand.
-
-Tabs that Con restores from your last session keep the provider they had before, because Con saves each tab's provider in `~/.local/share/con/session.json` and that overrides `con.conf`. Only new tabs pick up the local model. If a restored tab says `No API key found for anthropic`, switch that tab's provider to OpenAI-compatible in Con's provider picker, or close it and open a new one.
+Clients reach the server's OpenAI-compatible API at `http://127.0.0.1:9931/v1` with the key in `~/.config/qlm/api-key`.
 
 ## Everyday use
 
@@ -48,7 +43,6 @@ Tabs that Con restores from your last session keep the provider they had before,
 | `qlm status` | State, profile, uptime, VRAM and the largest request so far |
 | `qlm logs [-n N] [-f]` | The server's journal |
 | `qlm profile use <agent\|long\|vision>` | Switch profile; restarts the server if it is running. `long` has 96k context without MTP; `vision` needs `qlm fetch --vision` first |
-| `qlm suggest --enable` / `--disable` | Turn Con's shell suggestions on, from a small CPU-only Ollama model (about 1 GB download), or off |
 
 ## Measuring, updating and removing
 
@@ -59,11 +53,11 @@ qlm update --tag b11700 --commit <40-character sha> # build a newer llama.cpp; g
 qlm uninstall                                       # lists what it removes and asks; --models also removes the 17.8 GB of models
 ```
 
-`qlm bench` needs the server running, and Con should stay idle until it finishes, because the bench replaces Con's cached prompt. Each run is saved under `~/.local/state/qlm/bench/` and compared with the previous run of the same kind and profile.
+`qlm bench` needs the server running, and other clients should stay idle until it finishes, because the bench replaces the server's cached prompt. Each run is saved under `~/.local/state/qlm/bench/` and compared with the previous run of the same kind and profile.
 
 `qlm update` trusts the commit you give it, so copy it from the tag's page on [github.com/ggml-org/llama.cpp](https://github.com/ggml-org/llama.cpp/tags). The pinned tag in [ADR 0001](docs/adr/0001-runtime-llama-cpp-server.md) and `qlm/pins.py` doesn't move by itself; update both by hand if the new tag should become the pinned one.
 
-`qlm uninstall` keeps `~/.local/state/qlm/`, where the `con.conf` backups live. If Con still uses the local server, run `qlm con --revert` first, or afterwards from the clone with `bin/qlm con --revert`.
+`qlm uninstall` keeps `~/.local/state/qlm/`, where the bench results and logs live.
 
 ## Tests
 
