@@ -4,10 +4,13 @@ These read real tool output and hash the real model files, so they take tens of 
 They never build or download. The server test starts and stops the real qlm-server
 (about 20 GiB of VRAM for a few minutes) and leaves a smoke log in ~/.local/state/qlm/smoke/;
 it skips when the server is already running, so it never stops one you started. The bench test
-does the same and leaves a result in ~/.local/state/qlm/bench/.
+does the same and leaves a result in ~/.local/state/qlm/bench/. The per-model smoke test selects,
+starts and smokes each (model, profile) pair in turn, then puts back the selection and active.env;
+it fails when the server is already running, so stop it first.
 """
 
 import io
+import json
 from pathlib import Path
 
 import pytest
@@ -96,3 +99,36 @@ def test_a_quick_bench_measures_the_real_server_and_saves_a_result(repo):
         assert data["measures"]["mtp_on.peak_vram_gib"] > 0
     finally:
         assert cli.main(["stop"], real_ctx(Path.home(), repo)) == 0
+
+
+@pytest.mark.parametrize(
+    "model_id, profile",
+    [("qwen3.6-35b-a3b", "agent"), ("qwen3.6-35b-a3b", "long"), ("qwen3.8-27b", "agent")],
+)
+def test_selected_model_profile_passes_smoke(repo, model_id, profile):
+    from qlm import service
+    from qlm.system import SERVER
+
+    ctx = real_ctx(Path.home(), repo)
+    assert not service.unit_state(ctx).running, "stop qlm-server first: this test starts and stops it"
+    p = ctx.paths
+    saved_selection = p.selection.read_bytes() if p.selection.exists() else None
+    saved_active = p.active_env.read_bytes()
+    try:
+        use = real_ctx(Path.home(), repo)
+        assert cli.main(["use", model_id], use) == 0, use.err.getvalue()
+        start = real_ctx(Path.home(), repo)
+        assert cli.main(["start", profile], start) == 0, start.err.getvalue()
+        smoke = real_ctx(Path.home(), repo)
+        assert cli.main(["smoke"], smoke) == 0, smoke.out.getvalue() + smoke.err.getvalue()
+        key = p.api_key.read_text().strip()
+        reply = ctx.http.request("GET", f"{SERVER}/v1/models", headers={"Authorization": f"Bearer {key}"})
+        assert reply.status == 200
+        assert model_id in [m["id"] for m in json.loads(reply.body)["data"]]
+    finally:
+        assert cli.main(["stop"], real_ctx(Path.home(), repo)) == 0
+        p.active_env.write_bytes(saved_active)
+        if saved_selection is None:
+            p.selection.unlink(missing_ok=True)
+        else:
+            p.selection.write_bytes(saved_selection)
