@@ -91,6 +91,18 @@ def test_models_go_only_with_the_models_option(home, repo):
     assert not (p.home / ".local/share/qlm").exists()
 
 
+def test_models_removes_a_linked_model_file_but_not_the_copy_it_points_at(home, repo, tmp_path):
+    p = full_install(home, repo)
+    copy = tmp_path / "elsewhere/Qwen3.6-35B-A3B.Q4_K_M.gguf"
+    copy.parent.mkdir()
+    copy.write_bytes(b"weights")
+    (p.models / copy.name).symlink_to(copy)
+    code, ctx, _ = uninstall(home, repo, "--models", "--yes")
+    assert code == 0, out(ctx)
+    assert not p.models.exists()
+    assert copy.read_bytes() == b"weights"
+
+
 def test_the_share_directory_stays_when_something_else_is_in_it(home, repo):
     p = full_install(home, repo)
     (p.home / ".local/share/qlm/notes.txt").write_text("mine")

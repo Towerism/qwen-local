@@ -1,6 +1,7 @@
 """`qlm fetch`: download the selected model's pinned files with resume, and verify them against its ADR.
 
 It never deletes or overwrites a final model file; a corrupt one is reported for the user to remove.
+A local copy given with --from is linked, never copied, once its size and SHA-256 match a pin.
 """
 
 import errno
@@ -8,6 +9,7 @@ import hashlib
 import http.client
 import os
 import re
+from pathlib import Path
 
 from qlm import pins, selection, service
 from qlm.system import RedirectRefused
@@ -40,27 +42,39 @@ def _write(fh, chunk):
     fh.write(chunk)
 
 
-def run(ctx, vision=False):
+def run(ctx, vision=False, sources=()):
     try:
-        return _run(ctx, vision)
+        return _run(ctx, vision, sources)
     except OSError as e:
         return ctx.fail(f"file error: {e}", "Check the path and disk, then run qlm fetch again")
     except service.Stop as stop:
         return ctx.fail(stop.what, stop.todo)
 
 
-def _run(ctx, vision):
+def _run(ctx, vision, sources):
     model = pins.model(selection.current(ctx))
     if vision and not any(f.role == "mmproj" for f in model.files):
         print(f"qlm: no vision files for {model.id}. Run qlm fetch without --vision.", file=ctx.err)
         return 2
     wanted = pins.files(model, vision)
+    links = _match_sources(ctx, model, sources)
     models = ctx.paths.models
     models.mkdir(parents=True, exist_ok=True)
     failed, pending = [], []
 
+    for name, target in links.items():
+        if not (models / name).is_symlink():
+            os.symlink(target, models / name)
+        ctx.say(f"{name}: linked to {target} and verified")
+
     for f in wanted:
         final = models / f.local_name
+        if f.local_name in links:
+            continue
+        if final.is_symlink() and not final.exists():
+            ctx.warn(f"{f.local_name}: symlink to {os.readlink(final)} is broken; remove it and run qlm fetch")
+            failed.append(f)
+            continue
         if not final.exists():
             pending.append(f)
             continue
@@ -92,6 +106,28 @@ def _run(ctx, vision):
         return ctx.fail(f"{len(failed)} file(s) failed: {names}", "See the messages above, then run qlm fetch again")
     _write_sums(models)
     return 0
+
+
+def _match_sources(ctx, model, sources):
+    """{local name: resolved path} for each --from file. Raises Stop, with nothing written, unless every one matches."""
+    links = {}
+    for source in sources:
+        path = Path(source).resolve()
+        if not path.is_file():
+            raise service.Stop(f"{source} is not a regular file", "Check the path and run qlm fetch again")
+        same_size = [f for f in model.files if f.size == path.stat().st_size]
+        digest = sha256_of(path) if same_size else None
+        match = next((f for f in same_size if f.sha256 == digest), None)
+        if match is None:
+            raise service.Stop(
+                f"{source} doesn't match any pinned file of {model.id}",
+                "Check that it is one of the files in the model's ADR, or select its model with qlm use",
+            )
+        final = ctx.paths.models / match.local_name
+        if os.path.lexists(final) and not (final.is_symlink() and os.readlink(final) == str(path)):
+            raise service.Stop(f"{final} already exists", f"Remove it and run qlm fetch --from {source} again")
+        links[match.local_name] = path
+    return links
 
 
 def _bytes_still_needed(models, f):

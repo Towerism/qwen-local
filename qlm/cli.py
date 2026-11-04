@@ -23,8 +23,10 @@ def build_parser():
     install = sub.add_parser("install", help="build llama.cpp and install the service, profile and API key")
     install.add_argument("--tag", default=pins.LLAMA_TAG, help=f"llama.cpp tag; only the pinned {pins.LLAMA_TAG} (use qlm update for others)")
     install.add_argument("--rebuild", action="store_true", help="build again even if this tag is installed")
-    fetch = sub.add_parser("fetch", help="download and verify the pinned model files")
+    fetch = sub.add_parser("fetch", help="download and verify the selected model's pinned files")
     fetch.add_argument("--vision", action="store_true", help="also fetch the vision projector")
+    fetch.add_argument("--from", dest="sources", metavar="PATH", action="append", default=[],
+                       help="link this local copy instead of downloading it, once it matches a pin (repeatable)")
     use_model = sub.add_parser(
         "use",
         help="select the model to run; restarts the server if it is running",
@@ -122,7 +124,7 @@ def _dispatch(args, ctx):
     if args.command == "fetch":
         from qlm import fetch
 
-        return fetch.run(ctx, vision=args.vision)
+        return fetch.run(ctx, vision=args.vision, sources=args.sources)
     if args.command == "use":
         from qlm import service
 

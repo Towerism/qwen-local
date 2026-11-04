@@ -1,4 +1,5 @@
 import errno
+import os
 import hashlib
 import urllib.request
 
@@ -448,3 +449,125 @@ def test_progress_restarts_counting_after_a_full_restart(home, repo, pinned):
     lines = [line for line in ctx.err.getvalue().splitlines() if line.startswith(files[0].local_name) and line.endswith("%")]
     assert code == 0
     assert lines[0].endswith(" 0%") and len(lines) <= 101
+
+
+# --from: link a local copy after checking it against the pins
+
+
+@pytest.fixture
+def qwen35(monkeypatch, home, tmp_path):
+    """The 35B files, selected, and a directory outside the home holding local copies of them."""
+    select_model(home, "qwen3.6-35b-a3b")
+    files, contents, urls = small_pins(monkeypatch, "qwen3.6-35b-a3b")
+    copies = tmp_path / "ollama models"
+    copies.mkdir()
+    return files, contents, urls, copies
+
+
+def copy_of(copies, data, name="copy.gguf"):
+    path = copies / name
+    path.write_bytes(data)
+    return path
+
+
+def tree(directory):
+    """Every entry under a directory with its bytes, or None when the directory doesn't exist."""
+    if not directory.exists():
+        return None
+    return {p.relative_to(directory): p.read_bytes() for p in sorted(directory.rglob("*")) if p.is_file()}
+
+
+def test_from_links_a_matching_copy_and_downloads_only_the_rest(home, repo, qwen35, tmp_path):
+    files, contents, urls, copies = qwen35
+    main, mtp = files
+    source = copy_of(copies, contents[main.local_name])
+    (tmp_path / "via").symlink_to(copies)
+    before = source.stat()
+    http = FakeHttp(urls)
+
+    code, ctx = run_fetch(home, repo, http, "--from", str(tmp_path / "via" / "copy.gguf"))
+
+    assert code == 0, ctx.err.getvalue()
+    link = home / ".local/share/qlm/models" / main.local_name
+    assert link.is_symlink() and os.readlink(link) == str(source)
+    assert (source.stat().st_ino, source.stat().st_size) == (before.st_ino, before.st_size)
+    assert [r["url"] for r in http.requests] == [pins.download_url(mtp)]
+    assert f"{main.local_name}: linked to {source} and verified" in ctx.out.getvalue()
+
+
+@pytest.mark.parametrize("change", ["same size, wrong hash", "wrong size"])
+@pytest.mark.parametrize("models_dir_exists", [False, True])
+def test_from_refuses_a_copy_that_matches_no_pin_and_writes_nothing(home, repo, qwen35, change, models_dir_exists):
+    files, contents, urls, copies = qwen35
+    data = contents[files[0].local_name]
+    data = b"x" * len(data) if change == "same size, wrong hash" else data + b"x"
+    source = copy_of(copies, data)
+    models_dir = home / ".local/share/qlm/models"
+    if models_dir_exists:
+        models_dir.mkdir(parents=True)
+        (models_dir / "SHA256SUMS").write_text("earlier\n")
+    before = tree(models_dir)
+    http = FakeHttp(urls)
+
+    code, ctx = run_fetch(home, repo, http, "--from", str(source))
+
+    assert code == 1
+    assert f"{source} doesn't match any pinned file of qwen3.6-35b-a3b" in ctx.err.getvalue()
+    assert tree(models_dir) == before
+    assert http.requests == []
+
+
+def test_from_refuses_a_file_of_the_other_model(home, repo, qwen35):
+    files, contents, urls, copies = qwen35
+    other = pins.model("qwen3.8-27b").files[0]
+    source = copy_of(copies, contents[other.local_name])
+
+    code, ctx = run_fetch(home, repo, FakeHttp(urls), "--from", str(source))
+
+    assert code == 1
+    assert "doesn't match any pinned file of qwen3.6-35b-a3b" in ctx.err.getvalue()
+    assert not (home / ".local/share/qlm/models").exists()
+
+
+def test_from_refuses_to_replace_a_different_existing_file(home, repo, qwen35):
+    files, contents, urls, copies = qwen35
+    main = files[0]
+    source = copy_of(copies, contents[main.local_name])
+    existing = models(home) / main.local_name
+    existing.write_bytes(b"something else")
+
+    code, ctx = run_fetch(home, repo, FakeHttp(urls), "--from", str(source))
+
+    assert code == 1
+    assert f"{existing} already exists" in ctx.err.getvalue()
+    assert not existing.is_symlink() and existing.read_bytes() == b"something else"
+
+
+def test_from_again_with_the_same_copy_changes_nothing(home, repo, qwen35):
+    files, contents, urls, copies = qwen35
+    source = copy_of(copies, contents[files[0].local_name])
+    assert run_fetch(home, repo, FakeHttp(urls), "--from", str(source))[0] == 0
+    link = models(home) / files[0].local_name
+
+    http = FakeHttp(urls)
+    code, ctx = run_fetch(home, repo, http, "--from", str(source))
+
+    assert code == 0, ctx.err.getvalue()
+    assert link.is_symlink() and os.readlink(link) == str(source)
+    assert http.requests == []
+
+
+def test_a_broken_symlink_is_reported_and_not_downloaded_over(home, repo, qwen35):
+    files, contents, urls, copies = qwen35
+    main = files[0]
+    gone = copies / "moved-away.gguf"
+    link = models(home) / main.local_name
+    link.symlink_to(gone)
+    http = FakeHttp(urls)
+
+    code, ctx = run_fetch(home, repo, http)
+
+    assert code == 1
+    assert f"{main.local_name}: symlink to {gone} is broken; remove it and run qlm fetch" in ctx.err.getvalue()
+    assert link.is_symlink() and os.readlink(link) == str(gone)
+    assert pins.download_url(main) not in [r["url"] for r in http.requests]
