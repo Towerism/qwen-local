@@ -45,7 +45,7 @@ If you already have one of the model files, link it instead of downloading it:
 qlm fetch --from ~/models/Qwen3.6-35B-A3B.Q4_K_M.gguf
 ```
 
-`--from` accepts only a file whose size and SHA-256 match a pinned file of the selected model, so run `qlm use` first when the file belongs to the other model. qlm makes a symlink to the file and never copies, moves or deletes it. Files not given with `--from` are downloaded as usual.
+`--from` accepts only a file whose size and SHA-256 match a pinned file of the selected model, so run `qlm use` first when the file belongs to the other model. qlm makes a symlink to the file and never copies, moves or deletes it. Don't modify the linked file: qlm checks it when linking and on each `qlm fetch`, but not when the server starts. Files not given with `--from` are downloaded as usual.
 
 Then start the server and check it:
 
