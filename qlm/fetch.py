@@ -11,7 +11,7 @@ import os
 import re
 from pathlib import Path
 
-from qlm import pins, selection, service
+from qlm import files, pins, selection, service
 from qlm.system import RedirectRefused
 
 GIB = 2**30
@@ -240,6 +240,5 @@ def _verify_and_place(ctx, f, part):
 def _write_sums(models):
     """List every catalog file present in models/, so a fetch of one model keeps the other model's lines."""
     present = [f for m in pins.MODELS for f in m.files if (models / f.local_name).exists()]
-    tmp = models / ".SHA256SUMS.tmp"
-    tmp.write_text("".join(f"{f.sha256}  {f.local_name}\n" for f in present))
-    os.replace(tmp, models / "SHA256SUMS")
+    text = "".join(f"{f.sha256}  {f.local_name}\n" for f in present)
+    files.replace_atomically(models / "SHA256SUMS", text.encode(), 0o644)

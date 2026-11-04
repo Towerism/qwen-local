@@ -293,6 +293,15 @@ def test_sha256sums_written_after_full_success_and_kept_on_failure(home, repo, p
     assert (models(home) / "SHA256SUMS").read_text() == sums
 
 
+def test_sha256sums_never_writes_through_a_link_left_at_a_fixed_temporary_name(home, repo, pinned, tmp_path):
+    _, _, urls = pinned
+    outside = tmp_path / "outside"
+    outside.write_text("mine\n")
+    (models(home) / ".SHA256SUMS.tmp").symlink_to(outside)
+    assert run_fetch(home, repo, FakeHttp(urls))[0] == 0
+    assert outside.read_text() == "mine\n"
+    assert not (models(home) / "SHA256SUMS").is_symlink()
+
 def test_refused_redirect_fails_the_file_and_names_the_host(home, repo, pinned):
     files, contents, urls = pinned
     (models(home) / files[1].local_name).write_bytes(contents[files[1].local_name])
