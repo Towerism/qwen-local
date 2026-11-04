@@ -406,10 +406,15 @@ def use(ctx, model_id):
         )
     if not p.selection.exists():
         selection.save(ctx, selected)  # else a failed restart leaves active.env, and so the selection, on model_id
+    before = p.active_env.read_bytes() if p.active_env.exists() else None
     profile_use(ctx, name, model_id)
     selection.save(ctx, model_id)
     if replacing_custom:
         ctx.say(f"Replaced the custom active.env with the {name} profile of {model_id}.")
+    if p.active_env.read_bytes() == before and not unit_state(ctx).running:
+        # active.env already held this profile, as a failed restart in qlm use leaves it, so nothing said so yet
+        ctx.say(f"{model_id} is selected. qlm-server is stopped; start it with qlm start.")
+        return 0
     ctx.say(f"{model_id} is selected.")
     return 0
 

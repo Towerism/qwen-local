@@ -34,8 +34,9 @@ def build_parser():
             "Select a catalog model and save the choice in ~/.config/qlm/model. When its files are present, "
             "the same profile as now (or agent) is written to active.env, and a running server restarts with it. "
             "When they are missing, only the choice is saved: run qlm fetch, then qlm start. "
-            "If the restart fails, active.env keeps the new model's profile while the previous model stays "
-            "selected: qlm start goes back to the selected model, and qlm use tries again."
+            "If the restart fails, the server is stopped and active.env keeps the new model's profile while the "
+            "previous model stays selected: qlm start goes back to the selected model, and qlm use selects the "
+            "new one again without starting it, so run qlm start after it."
         ),
     )
     use_model.add_argument("model", metavar="<model>", help="one of: " + ", ".join(pins.model_ids()))

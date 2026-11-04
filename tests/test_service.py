@@ -276,6 +276,26 @@ def test_a_failed_restart_in_use_keeps_the_model_of_an_install_from_before_selec
     assert "Go back with qlm profile use agent" in out(ctx)
 
 
+def test_use_again_after_a_failed_restart_selects_the_model_and_names_qlm_start(home, repo):
+    p = install(home, repo)
+    add_model_files(p, "qwen3.6-35b-a3b")
+    run = runner({SHOW: [RUNNING, RUNNING, unit("failed", "failed", 0)], SMI_APPS: apps(("4321", "llama-server", "20800"))})
+    ctx = ctx_for(home, repo, run=run, server=FakeServer({("GET", "/health"): REFUSED}))
+    assert cli.main(["use", "qwen3.6-35b-a3b"], ctx) == 1
+
+    run = runner()
+    ctx = ctx_for(home, repo, run=run)
+    assert cli.main(["use", "qwen3.6-35b-a3b"], ctx) == 0
+    assert p.selection.read_text() == "qwen3.6-35b-a3b\n"
+    assert run.ran(*START) == [] and run.ran(*RESTART) == []
+    assert "qwen3.6-35b-a3b is selected. qlm-server is stopped; start it with qlm start." in out(ctx)
+
+    run = runner({SHOW: ready_after(1), SMI_GPU: gpu(used=1000)})
+    ctx = ctx_for(home, repo, run=run)
+    assert cli.main(["start"], ctx) == 0
+    assert p.active_env.read_text() == rendered(home, repo, "agent", "qwen3.6-35b-a3b")
+    assert len(run.ran(*START)) == 1
+
 def test_use_says_when_it_replaces_a_custom_active_env(home, repo):
     p = install(home, repo)
     add_model_files(p, "qwen3.6-35b-a3b")
