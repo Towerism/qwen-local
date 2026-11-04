@@ -11,7 +11,6 @@ BUILD_SPACE = 6 * GIB
 MIN_RAM = 32 * GIB
 PORT = 9931
 HOST = "127.0.0.1"
-CON_BAD_KEY = "con.agent.providers.openai-compatible."
 TIMEOUT_S = 10
 
 
@@ -39,7 +38,6 @@ def run(ctx):
         _ollama(ctx),
         _vram(ctx, facts),
         _path(ctx),
-        _con(ctx),
     ]
     for c in checks:
         ctx.say(c.line())
@@ -193,16 +191,3 @@ def _path(ctx):
     if any(entry and os.path.normpath(entry) == wanted for entry in ctx.env.path):
         return Check("PASS", "~/.local/bin on PATH", "yes")
     return Check("WARN", "~/.local/bin on PATH", 'no; add to ~/.zshrc: export PATH="$HOME/.local/bin:$PATH"')
-
-
-def _con(ctx):
-    conf = ctx.paths.con_conf
-    if not conf.exists():
-        return Check("PASS", "con config", "Con config not found")
-    for n, line in enumerate(conf.read_text(errors="replace").splitlines(), start=1):
-        if line.lstrip().startswith(CON_BAD_KEY):
-            return Check(
-                "FAIL", "con config",
-                f"line {n} uses {CON_BAD_KEY}*, which stops Con loading its config; rename it to con.agent.providers.openaicompatible.*",
-            )
-    return Check("PASS", "con config", "no invalid provider keys")

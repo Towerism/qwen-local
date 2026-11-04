@@ -41,19 +41,8 @@ def line_for(lines, name):
 def test_healthy_machine_passes_every_check(home, repo):
     code, lines, _ = run_doctor(home, repo)
     assert code == 0
-    assert len(lines) == 12
+    assert len(lines) == 11
     assert all(l.startswith("PASS ") for l in lines), lines
-
-
-def test_dashed_con_provider_key_fails(home, repo):
-    conf = home / ".config/con/con.conf"
-    conf.parent.mkdir(parents=True)
-    conf.write_text('con.agent.provider = "anthropic"\n  con.agent.providers.openai-compatible.base_url = "x"\n')
-
-    code, lines, _ = run_doctor(home, repo)
-
-    assert code == 1
-    assert line_for(lines, "con config").startswith("FAIL ")
 
 
 def test_low_vram_warns_and_names_each_gpu_process(home, repo):
@@ -108,7 +97,7 @@ def test_missing_nvidia_smi_fails_gpu_checks_but_others_still_run(home, repo):
     del runner.which_map["nvidia-smi"]
     code, lines, _ = run_doctor(home, repo, runner=runner)
     assert code == 1
-    assert len(lines) == 12
+    assert len(lines) == 11
     for name in ("gpu", "compute capability", "vram"):
         assert line_for(lines, name).startswith("FAIL "), name
     assert line_for(lines, "git and cmake").startswith("PASS ")
@@ -203,7 +192,7 @@ def test_unparseable_nvidia_smi_output_fails_gpu_checks_without_crashing(home, r
     runner = healthy_runner({GPU: ok("NVIDIA GeForce RTX 4090, 8.9, 24564, [N/A], 615.78.08\n")})
     code, lines, _ = run_doctor(home, repo, runner=runner)
     assert code == 1
-    assert len(lines) == 12
+    assert len(lines) == 11
     assert "unparseable" in line_for(lines, "gpu")
     assert line_for(lines, "vram").startswith("FAIL ")
 

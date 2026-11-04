@@ -24,11 +24,11 @@ def real_ctx(home, repo):
     return Ctx(Paths(home=home, repo=repo), Runner(), Http(), Clock(), Env(), io.StringIO(), io.StringIO())
 
 
-def test_doctor_reports_all_twelve_checks_on_this_machine(repo):
+def test_doctor_reports_all_eleven_checks_on_this_machine(repo):
     ctx = real_ctx(Path.home(), repo)
     doctor.run(ctx)
     lines = ctx.out.getvalue().splitlines()
-    assert len(lines) == 12
+    assert len(lines) == 11
     assert all(l.split()[0] in ("PASS", "WARN", "FAIL") for l in lines)
     assert lines[0].startswith("PASS gpu:")
 
