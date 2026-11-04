@@ -46,6 +46,9 @@ def plan(ctx, models):
     keep = [(p.state_dir, "bench results and logs")]
     if not models:
         keep.append((p.models, "the model files (add --models to remove them)"))
+    elif p.models.is_dir() and not p.models.is_symlink():
+        for link in sorted(e for e in p.models.iterdir() if e.is_symlink()):
+            keep.append((os.path.join(p.models, os.readlink(link)), f"linked from {link}; only the link is removed"))
     keep.append((p.repo, "this repo"))
     if exists(p.qlm_link) and not _our_link(p):
         keep.append((p.qlm_link, "it isn't a link to this repo's bin/qlm"))

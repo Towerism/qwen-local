@@ -103,6 +103,17 @@ def test_models_removes_a_linked_model_file_but_not_the_copy_it_points_at(home, 
     assert copy.read_bytes() == b"weights"
 
 
+def test_models_lists_the_copy_a_link_points_at_as_kept(home, repo, tmp_path):
+    p = full_install(home, repo)
+    copy = tmp_path / "elsewhere/Qwen3.6-35B-A3B.Q4_K_M.gguf"
+    copy.parent.mkdir()
+    copy.write_bytes(b"weights")
+    (p.models / copy.name).symlink_to(copy)
+    code, ctx, _ = uninstall(home, repo, "--models", "--yes")
+    assert code == 0, out(ctx)
+    keep = out(ctx).split("Will keep:", 1)[1]
+    assert f"  {copy}: linked from {p.models / copy.name}; only the link is removed\n" in keep
+
 def test_the_share_directory_stays_when_something_else_is_in_it(home, repo):
     p = full_install(home, repo)
     (p.home / ".local/share/qlm/notes.txt").write_text("mine")
